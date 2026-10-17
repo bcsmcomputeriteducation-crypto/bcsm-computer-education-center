@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bcsmcomputeriteducation-crypto.github.io/bcsm-computer-education-center/sitemap.xml
