@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>BCSM Batch Attendance - Excel Style</title>
+<style>
+*{box-sizing:border-box} body{margin:0;font-family:Calibri,Arial,sans-serif;background:#eef2f7;color:#111;overflow-x:hidden;overflow-y:auto}
+.top{background:#0b2b67;color:#fff;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:relative;top:auto;z-index:20}
+.top h1{font-size:24px;margin:0}.top small{opacity:.9}
+.controls{background:#fff;padding:6px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:end;border-bottom:1px solid #c7c7c7;position:relative;top:auto;z-index:19;overflow:visible;white-space:normal;min-height:54px}.controls .field{flex:0 0 auto}.controls .btn{flex:0 0 auto;padding:8px 10px;font-size:13px;min-height:36px}.controls input,.controls select{height:36px;padding:5px 8px;min-width:100px}
+.field{display:flex;flex-direction:column;gap:4px}.field label{font-weight:700;font-size:12px}.field select,.field input,.btn{height:34px;border:1px solid #999;border-radius:4px;padding:5px 9px;background:#fff;font-size:14px}
+.btn{cursor:pointer;font-weight:700}.btn.primary{background:#0b2b67;color:#fff;border-color:#0b2b67}.btn.green{background:#16833b;color:#fff;border-color:#16833b}.btn.red{background:#d71920;color:#fff;border-color:#d71920}.btn.gray{background:#eee}
+.wrap{padding:0}.sheet-shell{background:#fff;border:0;box-shadow:none}
+.sheet-title{display:none}
+.section-title{background:#ff0000;color:#fff;text-align:left;font-size:20px;font-weight:700;padding:7px 12px;position:sticky;top:0;left:0;z-index:1000;min-height:38px}
+.table-wrap{overflow:visible;height:auto;max-height:none;min-height:0;border-top:1px solid #777;position:relative;isolation:isolate}
+.table-wrap thead th{position:sticky;top:38px;z-index:12;background:#666;color:#fff}
+.table-wrap thead th.fixed{z-index:10}
+table{border-collapse:collapse;min-width:max-content;font-size:14px}
+th,td{border:1px solid #777;height:30px;text-align:center;padding:2px 5px}
+th{background:#666;color:#fff;position:sticky;top:38px;z-index:12}
+th.fixed,td.fixed{position:sticky;left:0;z-index:7;background:#eee}
+th.sr,td.sr{left:0;width:55px;min-width:55px}
+th.name,td.name{left:55px;width:205px;min-width:205px}
+th.father,td.father{left:260px;width:205px;min-width:205px}
+th.course,td.course{left:465px;width:110px;min-width:110px}
+th.contact,td.contact{width:145px;min-width:145px} th.guardian,td.guardian{width:175px;min-width:175px}
+th.day{min-width:34px;width:34px;font-size:12px;padding:1px}
+td.edit{background:#fff;text-align:left;padding:0}
+td.edit input{width:100%;height:29px;border:0;outline:0;padding:4px 6px;font-family:inherit;font-weight:600;background:transparent}
+td.att{min-width:34px;width:34px;font-weight:700;cursor:pointer;user-select:none}
+td.att.p{background:#d8f3dc;color:#087a25} td.att.a{background:#ffd6d6;color:#c40000} td.att.h{background:#fff0bd;color:#8a5b00}
+td.att.invalid{background:#ddd;color:#999;cursor:default}
+tr:nth-child(even) td.fixed{background:#f5f5f5}
+.summary{padding:10px;background:#f4f4f4;border-top:1px solid #aaa;font-size:13px}
+.badge{display:inline-block;padding:3px 7px;border-radius:10px;margin-right:5px;background:#ddd}
+.notice{padding:9px 12px;background:#fff7cc;border-bottom:1px solid #e4d17a;font-size:13px}
+@media(max-width:700px){.top h1{font-size:18px}.controls{gap:4px;padding:5px}.controls .btn{padding:7px 8px;font-size:12px}.sheet-title{font-size:20px}.section-title{font-size:16px}th.name,td.name,th.father,td.father{width:160px;min-width:160px}th.course,td.course{width:90px;min-width:90px}}
+</style>
+</head>
+<body>
+<div id="mainPasswordOverlay" style="position:fixed;inset:0;background:#0009;z-index:200000;display:flex;align-items:center;justify-content:center;padding:15px">
+  <div style="background:#fff;width:min(420px,100%);border-radius:10px;padding:22px;box-shadow:0 12px 40px #0006;text-align:center">
+    <h2 style="margin:0 0 10px;color:#0b2b67">🔒 BCSM Attendance System</h2>
+    <p style="margin:0 0 14px">Main Attendance Sheet खोलने के लिए password डालें।</p>
+    <input id="mainPasswordInput" type="password" autocomplete="current-password" placeholder="Password" style="width:100%;height:42px;border:1px solid #999;border-radius:5px;padding:8px;font-size:18px;text-align:center">
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+      <button class="btn primary" id="mainPasswordOpen">OPEN</button>
+      <button class="btn gray" id="mainPasswordChange" style="display:none">CHANGE PASSWORD</button>
+    </div>
+    <div id="mainPasswordMsg" style="color:#c40000;min-height:20px;margin-top:8px;font-weight:700"></div>
+  </div>
+</div>
+<div class="top">
+  <div><h1>BCSM Batch Attendance System</h1><small>Excel-style student details & daily attendance</small></div>
+  <div id="saveState">Saved</div>
+</div>
+
+<div class="controls">
+  <div class="field"><label>Batch</label><select id="batch"></select></div>
+  <div class="field"><label>Month</label><select id="month"></select></div>
+  <div class="field"><label>Year</label><input id="year" type="number" min="2020" max="2100"></div>
+  <button class="btn primary" onclick="newStudent()">+ Add Student</button>
+  <button class="btn green" id="exportExcelBtn">Export Monthly Excel</button>
+  <button class="btn primary" id="overallSummaryBtn">ALL BATCH SUMMARY</button>
+  <button class="btn" onclick="exportCSV()">Export CSV</button>
+  <input id="restoreFile" type="file" accept=".json" hidden onchange="restore(this.files[0])">
+  <button class="btn red" onclick="clearMonth()">Clear Month Attendance</button>
+  <button class="btn primary" onclick="openStudentDataPage()">STUDENT DATA</button>
+  <button class="btn gray" onclick="changeAttendancePassword()">CHANGE PASSWORD</button>
+</div>
+
+<div class="notice">
+  <b>Excel जैसा इस्तेमाल:</b> Student Name और Father Name यहाँ केवल दिखाई देंगे। Student Data में details भरें। Attendance cell पर क्लिक करके
+  <b>Blank → P → A → H → Blank</b> करें। डेटा browser में अपने-आप save होता है।
+</div>
+
+
+<div id="summary" style="display:none" aria-hidden="true"></div>
+<div class="wrap">
+  <div class="sheet-shell">
+    <div id="sheetTitle" class="sheet-title"></div>
+    <div class="section-title"><span id="sectionBatchTitle">09 TO 11 SECOND — OCTOBER 2026</span> &nbsp; | &nbsp; STUDENT DETAILS & ATTENDANCE</div>
+    <div class="table-wrap">
+      <table id="sheet"></table>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/12.2.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.2.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.2.1/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBpRJWw40bh0htAeDc-yNO8wXqhMMCROy0",
+  authDomain: "bcsm-attendance.firebaseapp.com",
+  databaseURL: "https://bcsm-attendance-default-rtdb.firebaseio.com",
+  projectId: "bcsm-attendance",
+  storageBucket: "bcsm-attendance.firebasestorage.app",
+  messagingSenderId: "144933474559",
+  appId: "1:144933474559:web:20eb2cf7de655c9ebd3cca",
+  measurementId: "G-HPPQV8BR8X"
+};
+const firebaseApp = firebase.initializeApp(firebaseConfig);
+const firebaseAuth = firebase.auth();
+// Login session should last only until this browser window/tab is closed.
+// This prevents automatic login when the window is opened again.
+firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(e=>console.error("Auth session persistence error:",e));
+const firebaseDB = firebase.database();
+const CLOUD_DB_PATH = "BCSM_ATTENDANCE_V2";
+let cloudReady = false;
+let cloudLoading = false;
+let suppressCloudWrite = false;
+let cloudSaveTimer = null;
+
+const BATCHES = [
+ "07 TO 09 FIRST","07 TO 09 SECOND","O LEVEL",
+ "09 TO 11 FIRST","09 TO 11 SECOND",
+ "11 TO 01 FIRST","11 TO 01 SECOND",
+ "01 TO 03 FIRST","01 TO 03 SECOND",
+ "03 TO 05 FIRST","03 TO 05 SECOND"
+];
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS=["SUN","MON","TUE","WED","THU","FRI","SAT"];
+const KEY="BCSM_ATTENDANCE_V2";
+let db={};
+let currentBatch=0,currentMonth=new Date().getMonth(),currentYear=new Date().getFullYear();
+
+function init(){
+  const bs=document.getElementById("batch"), ms=document.getElementById("month");
+  BATCHES.forEach((b,i)=>bs.add(new Option(b,b)));
+  MONTHS.forEach((m,i)=>ms.add(new Option(m,i)));
+  bs.value=BATCHES[currentBatch]; ms.value=currentMonth; document.getElementById("year").value=currentYear;
+  bs.onchange=()=>{const idx=BATCHES.indexOf(bs.value); if(idx>=0) currentBatch=idx; render()};
+  ms.onchange=()=>{currentMonth=+ms.value; render()};
+  document.getElementById("year").onchange=()=>{currentYear=+document.getElementById("year").value||currentYear; render()};
+}
+function key(){return BATCHES[currentBatch]}
+function ensureBatch(){
+  if(!db[key()]) db[key()]={students:[]};
+  if(!Array.isArray(db[key()].students)) db[key()].students=[];
+}
+function studentData(){
+  ensureBatch();
+  return db[key()].students;
+}
+function daysInMonth(){return new Date(currentYear,currentMonth+1,0).getDate()}
+function dateKey(d){return `${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`}
+function save(){
+  document.getElementById("saveState").textContent="Saving…";
+  if(!cloudReady || suppressCloudWrite || !firebaseAuth.currentUser){
+    document.getElementById("saveState").textContent=cloudReady?"Not signed in":"Waiting for cloud…";
+    return;
+  }
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(()=>{
+    firebaseDB.ref(CLOUD_DB_PATH).set(db)
+      .then(()=>{document.getElementById("saveState").textContent="Saved ✓";setTimeout(()=>document.getElementById("saveState").textContent="Saved",700)})
+      .catch(e=>{console.error(e);document.getElementById("saveState").textContent="Cloud save error";alert("Firebase data save नहीं हो पाया: "+e.message);});
+  },120);
+}
+
+async function loadCloudData(){
+  if(!firebaseAuth.currentUser) return;
+  cloudLoading=true;
+  document.getElementById("saveState").textContent="Loading cloud…";
+  try{
+    const snap=await firebaseDB.ref(CLOUD_DB_PATH).once("value");
+    suppressCloudWrite=true;
+    db=snap.exists() ? (snap.val()||{}) : {};
+    render();
+    suppressCloudWrite=false;
+    cloudReady=true;
+    document.getElementById("saveState").textContent="Cloud synced ✓";
+    setTimeout(()=>document.getElementById("saveState").textContent="Saved",900);
+  }catch(e){
+    suppressCloudWrite=false;
+    console.error(e);
+    document.getElementById("saveState").textContent="Cloud load error";
+    alert("Firebase data load नहीं हो पाया: "+e.message);
+  }finally{cloudLoading=false;}
+}
+
+function startCloudSync(){
+  if(!firebaseAuth.currentUser) return;
+  firebaseDB.ref(CLOUD_DB_PATH).off();
+  firebaseDB.ref(CLOUD_DB_PATH).on("value",snap=>{
+    if(cloudLoading) return;
+    suppressCloudWrite=true;
+    db=snap.exists() ? (snap.val()||{}) : {};
+    render();
+    suppressCloudWrite=false;
+    cloudReady=true;
+    document.getElementById("saveState").textContent="Live synced ✓";
+  },err=>{
+    console.error(err);
+    document.getElementById("saveState").textContent="Cloud sync error";
+  });
+}
+function getAllBatchAbsenceStudents(){
+  const results=[];
+  const y=Number(currentYear), m=Number(currentMonth);
+
+  BATCHES.forEach((batch,batchIndex)=>{
+    const students=(db[batch] && Array.isArray(db[batch].students)) ? db[batch].students : [];
+
+    students.forEach((st,index)=>{
+      const dates=[];
+      Object.keys(st.att||{}).forEach(rawKey=>{
+        const value=String(st.att[rawKey]||"").trim().toUpperCase();
+        if(value!=="A") return;
+
+        let dt=null, k=String(rawKey).trim(), mt;
+        mt=k.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if(mt) dt=new Date(Number(mt[1]),Number(mt[2])-1,Number(mt[3]));
+        if(!dt){
+          mt=k.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+          if(mt) dt=new Date(Number(mt[3]),Number(mt[2])-1,Number(mt[1]));
+        }
+        if(!dt || isNaN(dt.getTime())) return;
+        if(dt.getFullYear()!==y || dt.getMonth()!==m) return;
+        const dateKeyForRecord=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+        const deletedDates=Array.isArray(st._absenceRecordDeletedDates)?st._absenceRecordDeletedDates:[];
+        if(deletedDates.includes(dateKeyForRecord)) return;
+        dates.push(dt.getDate());
+      });
+
+      const unique=[...new Set(dates)].sort((a,b)=>a-b);
+      let bestStart=0,bestEnd=0,best=0,runStart=0,run=0,prev=null;
+
+      unique.forEach(day=>{
+        if(prev!==null && day===prev+1){
+          run++;
+        }else{
+          run=1;
+          runStart=day;
+        }
+        if(run>best){
+          best=run;
+          bestStart=runStart;
+          bestEnd=day;
+        }
+        prev=day;
+      });
+
+      if(best>=3){
+        const currentPeriod=`${String(bestStart).padStart(2,"0")}-${String(bestEnd).padStart(2,"0")} ${MONTHS[m]} ${y}`;
+        results.push({
+          batch,batchIndex,index,
+          name:st.name||"",father:st.father||"",course:st.course||"",
+          contact:st.contact||"",guardian:st.guardian||"",
+          streak:best,
+          period:currentPeriod
+        });
+      }
+    });
+  });
+  return results;
+}
+
+function renderAbsenceAlert(){
+  const rows=getAllBatchAbsenceStudents();
+  const absenceBtn=document.getElementById('absenceBtn');
+  if(absenceBtn){ absenceBtn.textContent="ABSENT STUDENTS & SMS"; }
+
+  const box=document.getElementById('absenceAlert');
+  if(!box)return;
+  box.innerHTML=rows.length
+    ? `<div style="overflow:auto"><table><thead><tr><th>SR.NO</th><th>Batch</th><th>Student Name</th><th>Father Name</th><th>Course</th><th>Student Contact</th><th>Father / Guardian Contact</th><th>Absent Days</th><th>Absent Period</th><th>CALL</th></tr></thead><tbody>${rows.map((r,n)=>`<tr><td>${n+1}</td><td>${esc(r.batch)}</td><td>${esc(r.name)}</td><td>${esc(r.father)}</td><td>${esc(r.course)}</td><td>${esc(r.contact)}</td><td>${esc(r.guardian)}</td><td>${r.streak}</td><td>${r.period}</td><td><button class="btn red" onclick="callGuardian(${r.batchIndex},${r.index})">📞 CALL</button></td></tr>`).join('')}</tbody></table></div>`
+    : 'कोई भी student किसी भी batch में लगातार 3 या अधिक दिन absent नहीं है।';
+}
+
+function getDateWiseAbsenceRecords(){
+  const rows=[];
+  BATCHES.forEach((batch,batchIndex)=>{
+    const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+    students.forEach((s,index)=>{
+      Object.keys(s.att||{}).forEach(k=>{
+        if(String(s.att[k]||"").trim().toUpperCase()!=="A")return;
+        if(Array.isArray(s._absenceSmsSentDates) && s._absenceSmsSentDates.includes(k))return;
+        const m=k.match(/^(\d{4})-(\d{2})-(\d{2})$/); if(!m)return;
+        const y=Number(m[1]),mo=Number(m[2]),d=Number(m[3]);
+        if(y!==currentYear||mo!==currentMonth+1)return;
+        rows.push({batch,batchIndex,index,name:s.name||"",father:s.father||"",course:s.course||"",contact:s.contact||"",guardian:s.guardian||"",day:d,dateKey:k});
+      });
+    });
+  });
+  return rows.sort((a,b)=>b.day-a.day||a.batch.localeCompare(b.batch)||a.name.localeCompare(b.name));
+}
+function getAllBatchAttendanceSummary(selectedDateKey){
+  let totalStudents=0,presentCount=0,absentCount=0,unmarkedCount=0;
+  const batchRows=[];
+  const chosenKey=selectedDateKey||dateKey(new Date().getDate());
+  BATCHES.forEach(batch=>{
+    const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+    const active=students.filter(s=>s._studentData===true || s.name || s.father || s.course || s.contact || s.guardian);
+    let p=0,a=0,u=0;
+    active.forEach(st=>{
+      totalStudents++;
+      const v=String((st.att||{})[chosenKey]||"").trim().toUpperCase();
+      if(v==="P")p++; else if(v==="A")a++; else u++;
+    });
+    presentCount+=p; absentCount+=a; unmarkedCount+=u;
+    batchRows.push({batch,count:active.length,present:p,absent:a,unmarked:u});
+  });
+  return {totalStudents,presentCount,absentCount,unmarkedCount,chosenKey,batchRows};
+}
+function showOverallSummaryPage(selectedDateKey){
+  const chosenKey=selectedDateKey||`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(new Date().getDate()).padStart(2,"0")}`;
+  const s=getAllBatchAttendanceSummary(chosenKey);const old=document.getElementById("overallSummaryPage");if(old)old.remove();
+  const page=document.createElement("div");page.id="overallSummaryPage";page.style.cssText="position:fixed;inset:0;background:#eef2f7;z-index:100001;overflow:auto";
+  const rows=s.batchRows.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.batch)}</td><td>${r.count}</td><td style="color:#087a25;font-weight:700">${r.present}</td><td style="color:#c40000;font-weight:700">${r.absent}</td><td>${r.unmarked}</td></tr>`).join("");
+  page.innerHTML=`<div style="background:#0b2b67;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:2"><b style="font-size:22px">ALL BATCH STUDENT SUMMARY</b><button class="btn" onclick="document.getElementById('overallSummaryPage').remove()">← BACK</button></div><div style="padding:15px"><div style="background:#fff;padding:14px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>Attendance Date:</b><input id="summaryDatePicker" type="date" value="${chosenKey}" style="height:36px;padding:6px"><button class="btn primary" id="summaryDateApply">SHOW SUMMARY</button></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:15px"><div style="background:#fff;border:1px solid #bbb;border-radius:7px;padding:18px">Total Students<div style="font-size:32px;font-weight:800;color:#0b2b67">${s.totalStudents}</div></div><div style="background:#d8f3dc;border:1px solid #8ac79a;border-radius:7px;padding:18px">Present on ${s.chosenKey}<div style="font-size:32px;font-weight:800;color:#087a25">${s.presentCount}</div></div><div style="background:#ffd6d6;border:1px solid #e5a0a0;border-radius:7px;padding:18px">Absent on ${s.chosenKey}<div style="font-size:32px;font-weight:800;color:#c40000">${s.absentCount}</div></div><div style="background:#fff;border:1px solid #bbb;border-radius:7px;padding:18px">Not marked<div style="font-size:32px;font-weight:800">${s.unmarkedCount}</div></div></div><div style="background:#fff;border:1px solid #aaa;overflow:auto"><table style="border-collapse:collapse;width:100%;min-width:700px"><thead><tr>${["SR.NO","Batch","Total Students","Present on Date","Absent on Date","Not Marked"].map(x=>`<th style="border:1px solid #777;padding:10px;background:#666;color:#fff">${x}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div><p style="font-size:13px;color:#444">तारीख बदलकर SHOW SUMMARY दबाएँ। Present और Absent की संख्या उसी चुनी हुई तारीख की है।</p></div>`;
+  document.body.appendChild(page);
+  page.querySelector("#summaryDateApply").onclick=()=>{const val=page.querySelector("#summaryDatePicker").value;if(!val){alert("कृपया तारीख चुनें।");return;}showOverallSummaryPage(val);};
+}
+
+function showAbsencePage(){
+  save();
+  const rows=getDateWiseAbsenceRecords();
+  const old=document.getElementById("absenceFullPage"); if(old)old.remove();
+  const page=document.createElement("div"); page.id="absenceFullPage";
+  page.style.cssText="position:fixed;inset:0;background:#eef2f7;z-index:99999;overflow:auto";
+  const table=rows.length?`<div style="background:#fff;border:1px solid #aaa;overflow:auto"><table style="border-collapse:collapse;width:100%;min-width:0;width:100%"><thead><tr>${["SR.NO","Absent Date","Day","Batch","Student Name","Father Name","Course","Student Contact","Father / Guardian Contact","SMS"].map(x=>`<th style="border:1px solid #777;padding:6px;background:#666;color:#fff;position:sticky;top:0;white-space:nowrap">${x}</th>`).join("")}</tr></thead><tbody>${rows.map((r,n)=>`<tr><td style="border:1px solid #777;padding:8px">${n+1}</td><td style="border:1px solid #777;padding:8px">${String(r.day).padStart(2,"0")} ${MONTHS[Number(r.dateKey.slice(5,7))-1]} ${r.dateKey.slice(0,4)}</td><td style="border:1px solid #777;padding:8px">${DAYS[new Date(Number(r.dateKey.slice(0,4)),Number(r.dateKey.slice(5,7))-1,r.day).getDay()]}</td><td style="border:1px solid #777;padding:8px">${esc(r.batch)}</td><td style="border:1px solid #777;padding:8px">${esc(r.name)}</td><td style="border:1px solid #777;padding:8px">${esc(r.father)}</td><td style="border:1px solid #777;padding:8px">${esc(r.course)}</td><td style="border:1px solid #777;padding:8px">${esc(r.contact)}</td><td style="border:1px solid #777;padding:8px">${esc(r.guardian)}</td><td style="border:1px solid #777;padding:8px;white-space:nowrap"><button class="btn red" onclick="sendAbsenceSMS(${r.batchIndex},${r.index},${r.day},'${r.dateKey}')">SMS</button> <button class="btn green" onclick="markAbsenceSMSSent(${r.batchIndex},${r.index},${r.day},'${r.dateKey}')">SMS भेज दिया</button></td></tr>`).join("")}</tbody></table></div>`:`<div style="background:#fff;padding:25px;text-align:center;font-weight:700">${MONTHS[currentMonth]} ${currentYear} में कोई absent entry नहीं है।</div>`;
+  page.innerHTML=`<div style="background:#0b2b67;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:2"><b style="font-size:22px">ABSENT STUDENTS — DATE-WISE SMS LIST</b><button class="btn" onclick="document.getElementById('absenceFullPage').remove()">← BACK</button></div><div style="padding:15px"><div style="background:#fff;padding:10px;margin-bottom:12px;font-weight:700">Month: ${MONTHS[currentMonth]} ${currentYear} | Total absent entries: ${rows.length} | हर absent date की अलग entry</div>${table}</div>`;
+  document.body.appendChild(page);
+}
+function sendAbsenceSMS(batchIndex,index,day,dateKeyOverride){
+  const s=(db[BATCHES[batchIndex]]&&db[BATCHES[batchIndex]].students||[])[index]; if(!s)return;
+  const k=dateKeyOverride||`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  if(String((s.att||{})[k]||"").trim().toUpperCase()!=="A"){alert("इस तारीख पर student absent नहीं है।");return;}
+  const number=String(s.guardian||s.contact||"").trim();
+  if(!number){alert("इस student का Father / Guardian Contact या Student Contact दर्ज नहीं है।");return;}
+  const dateText=`${String(day).padStart(2,"0")} ${MONTHS[currentMonth]} ${currentYear}`;
+  const msg=`प्रिय अभिभावक, ${s.name||"आपका बच्चा"} ${dateText} को BCSM Computer Education Center में अनुपस्थित है। कृपया अनुपस्थिति का कारण सुनिश्चित करें। – BCSM`;
+  window.location.href="sms:"+encodeURIComponent(number)+"?body="+encodeURIComponent(msg);
+}
+function markAbsenceSMSSent(batchIndex,index,day,dateKeyOverride){
+  const s=(db[BATCHES[batchIndex]]&&db[BATCHES[batchIndex]].students||[])[index]; if(!s)return;
+  const k=dateKeyOverride||`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  if(String((s.att||{})[k]||"").trim().toUpperCase()!=="A"){alert("इस तारीख पर student absent नहीं है।");return;}
+  if(!confirm(`क्या ${s.name||"इस student"} के लिए ${k} वाला SMS वास्तव में भेज दिया गया है? Confirm करने पर यह entry सूची से हट जाएगी।`))return;
+  if(!Array.isArray(s._absenceSmsSentDates))s._absenceSmsSentDates=[];
+  if(!s._absenceSmsSentDates.includes(k))s._absenceSmsSentDates.push(k);
+  save(); showAbsencePage();
+}
+
+function callGuardian(batchIndex,index){const s=(db[BATCHES[batchIndex]]&&db[BATCHES[batchIndex]].students||[])[index];const number=(s&&s.guardian||"").trim();if(!number){alert("इस student का Father / Guardian Contact दर्ज नहीं है।");return;}window.location.href="tel:"+encodeURIComponent(number);}
+
+function deleteAbsenceRecord(batchIndex,index){
+  const batch=BATCHES[batchIndex];
+  const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+  const s=students[index];
+  if(!s)return;
+
+  const rows=getAllBatchAbsenceStudents();
+  const record=rows.find(r=>r.batchIndex===batchIndex && r.index===index);
+  if(!record)return;
+
+  if(!confirm(`क्या ${s.name||"इस student"} का 3+ Days Absent record delete करना है?\n\nDelete करने के बाद यदि यह student फिर से लगातार 3 या अधिक दिन absent होगा, तो नया record फिर बनेगा।`))return;
+
+  const deletedDates=Array.isArray(s._absenceRecordDeletedDates)?s._absenceRecordDeletedDates:[];
+  const deletedSet=new Set(deletedDates);
+  const start=Number(record.period.slice(0,2));
+  const end=Number(record.period.slice(3,5));
+  const y=currentYear, m=currentMonth;
+  for(let d=start;d<=end;d++){
+    const k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    deletedSet.add(k);
+  }
+  s._absenceRecordDeletedDates=[...deletedSet];
+  s._absenceRecordDeletedAt=new Date().toISOString();
+  save();
+  showAbsencePage();
+}
+
+/* =========================
+   SEPARATE STUDENT DATA PAGE
+   ========================= */
+function closeBCSMPage(id){
+  const el=document.getElementById(id);
+  if(el) el.remove();
+}
+
+function openStudentDataPage(){
+  const old=document.getElementById("studentDataPage");
+  if(old) old.remove();
+
+  const page=document.createElement("div");
+  page.id="studentDataPage";
+  page.style.cssText="position:fixed;inset:0;background:#eef2f7;z-index:100000;overflow:auto";
+
+  function dataRows(){
+    const batch=page.querySelector("#sdBatch").value;
+    const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+    let h="";
+    students.forEach((s,i)=>{
+      h+=`<tr>
+        <td class="fixed sr">${i+1}</td>
+        <td class="fixed name edit"><input value="${esc(s.name||"")}" onchange="studentDataPageSet('${esc(batch)}',${i},'name',this.value)"></td>
+        <td class="fixed father edit"><input value="${esc(s.father||"")}" onchange="studentDataPageSet('${esc(batch)}',${i},'father',this.value)"></td>
+        <td class="fixed course edit"><input value="${esc(s.course||"")}" onchange="studentDataPageSet('${esc(batch)}',${i},'course',this.value)"></td>
+        <td class="edit"><input value="${esc(s.contact||"")}" onchange="studentDataPageSet('${esc(batch)}',${i},'contact',this.value)"></td>
+        <td class="edit"><input value="${esc(s.guardian||"")}" onchange="studentDataPageSet('${esc(batch)}',${i},'guardian',this.value)"></td>
+        <td style="white-space:nowrap"><button class="btn green" onclick="saveStudentDataStudent('${esc(batch)}',${i})">SAVE</button> <button class="btn red" onclick="deleteStudentData('${esc(batch)}',${i})">DELETE</button></td>
+      </tr>`;
+    });
+    return h || `<tr><td colspan="8" style="padding:25px;text-align:center;font-weight:700">इस batch में अभी कोई student नहीं है। + ADD STUDENT दबाएँ।</td></tr>`;
+  }
+
+  page.innerHTML=`
+    <div class="top" style="position:relative;top:auto;z-index:10">
+      <div><h1>BCSM Batch Attendance System</h1><small>STUDENT DATA — Student details entry & editing</small></div>
+      <button class="btn" onclick="closeBCSMPage('studentDataPage')">← BACK</button>
+    </div>
+    <div class="controls" style="position:relative;top:auto;z-index:9">
+      <div class="field"><label>Batch</label><select id="sdBatch">${BATCHES.map((b,i)=>`<option value="${esc(b)}" ${i===currentBatch?"selected":""}>${esc(b)}</option>`).join("")}</select></div>
+      <button class="btn primary" id="sdAdd">+ ADD STUDENT</button>
+      <button class="btn green" id="sdSave">SAVE</button>
+    </div>
+    <div class="notice"><b>STUDENT DATA:</b> यहाँ Name, Father Name, Course, Student Contact और Father / Guardian Contact दर्ज या edit करें। यही data Attendance Sheet में दिखाई देगा।</div>
+    <div class="wrap">
+      <div class="sheet-shell">
+        <div id="sdTitle" class="sheet-title"></div>
+        <div class="section-title">STUDENT DATA</div>
+        <div class="table-wrap" style="max-height:75vh">
+          <table>
+            <thead><tr>
+              <th class="fixed sr">SR.NO</th><th class="fixed name">Name</th><th class="fixed father">Father Name</th>
+              <th class="fixed course">COURSE</th><th>Student Contact</th><th>Father / Guardian Contact</th><th>ACTION</th>
+            </tr></thead>
+            <tbody id="sdBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(page);
+
+  function refresh(){
+    const b=page.querySelector("#sdBatch").value;
+    page.querySelector("#sdTitle").textContent=`${b} — STUDENT DATA`;
+    page.querySelector("#sdBody").innerHTML=dataRows();
+  }
+  page.querySelector("#sdBatch").addEventListener("change",refresh);
+  page.querySelector("#sdAdd").addEventListener("click",()=>{
+    const b=page.querySelector("#sdBatch").value;
+    if(!db[b]) db[b]={students:[]};
+    db[b].students.push({name:"",father:"",course:"",contact:"",guardian:"",att:{},_studentData:true});
+    save();
+    refresh();
+    setTimeout(()=>{
+      const inputs=page.querySelectorAll("#sdBody td.name input");
+      if(inputs.length) inputs[inputs.length-1].focus();
+    },50);
+  });
+  page.querySelector("#sdSave").addEventListener("click",()=>{
+    save();
+    render();
+    alert("Student details saved. Attendance sheet में student जुड़ गया है।");
+  });
+  page.querySelector("#sdSave").addEventListener("click",saveStudentDataPage);
+  refresh();
+}
+
+function studentDataPageSet(batch,index,key,value){
+  if(!db[batch]) db[batch]={students:[]};
+  if(!db[batch].students[index]) return;
+  db[batch].students[index][key]=value;
+  save();
+}
+
+function saveStudentDataStudent(batch,index){
+  if(!db[batch] || !Array.isArray(db[batch].students) || !db[batch].students[index]) return;
+  db[batch].students[index]._studentData=true;
+  const batchIndex=BATCHES.indexOf(batch);
+  if(batchIndex>=0) currentBatch=batchIndex;
+  save();
+  render();
+  const page=document.getElementById("studentDataPage");
+  if(page){
+    const select=page.querySelector("#sdBatch");
+    if(select) select.value=batch;
+  }
+  alert("Student Data saved. यह student इसी batch में Attendance में दिखेगा।");
+}
+
+function deleteStudentData(batch,index){
+  if(!db[batch] || !Array.isArray(db[batch].students) || !db[batch].students[index]) return;
+  if(!confirm("क्या इस student को Student Data से delete करना है?")) return;
+  db[batch].students.splice(index,1);
+  save();
+  const page=document.getElementById("studentDataPage");
+  if(page){
+    const select=page.querySelector("#sdBatch");
+    if(select) select.dispatchEvent(new Event("change"));
+  }
+  render();
+}
+
+function saveStudentDataPage(){
+  const page=document.getElementById("studentDataPage");
+  if(!page) return;
+  const batch=page.querySelector("#sdBatch").value;
+  const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+  students.forEach(s=>s._studentData=true);
+  save();
+  render();
+  alert("Student Data Saved. Main Attendance में यही students दिखेंगे।");
+}
+
+/* =========================
+   PASSWORD PROTECTED ATTENDANCE SHEET
+   ========================= */
+const SYSTEM_PASSWORD_KEY="BCSM_SYSTEM_PASSWORD";
+const ATT_PASSWORD_KEY=SYSTEM_PASSWORD_KEY;
+
+function getAttendancePassword(){
+  return localStorage.getItem(SYSTEM_PASSWORD_KEY) || "1234";
+}
+function askAttendancePassword(){
+  return new Promise(resolve=>{
+    const old=document.getElementById("attendancePasswordModal");
+    if(old) old.remove();
+
+    const modal=document.createElement("div");
+    modal.id="attendancePasswordModal";
+    modal.style.cssText="position:fixed;inset:0;background:#0008;z-index:100002;display:flex;align-items:center;justify-content:center;padding:15px";
+    modal.innerHTML=`
+      <div style="background:#fff;width:min(420px,100%);border-radius:8px;padding:20px;box-shadow:0 10px 30px #0005">
+        <h2 style="margin:0 0 12px;color:#0b2b67">ATTENDANCE SHEET PASSWORD</h2>
+        <input id="attendancePasswordInput" type="password" autocomplete="off" placeholder="Password"
+          style="width:100%;height:40px;border:1px solid #999;border-radius:4px;padding:8px;font-size:16px">
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+          <button class="btn" id="apCancel">CANCEL</button>
+          <button class="btn primary" id="apOpen">OPEN</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:#666">Main Page का password: 1234 (यदि पहले change नहीं किया है)</div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const input=modal.querySelector("#attendancePasswordInput");
+    const close=()=>{modal.remove();resolve(false)};
+    modal.querySelector("#apCancel").onclick=close;
+    modal.querySelector("#apOpen").onclick=()=>{
+      if(input.value===getAttendancePassword()){modal.remove();resolve(true)}
+      else {alert("गलत password");input.value="";input.focus();}
+    };
+    input.addEventListener("keydown",e=>{if(e.key==="Enter")modal.querySelector("#apOpen").click()});
+    setTimeout(()=>input.focus(),50);
+  });
+}
+
+async function changeAttendancePassword(){
+  await changeMainPassword();
+}
+
+async function openAttendanceSheet(){
+  if(!(await askAttendancePassword())) return;
+
+  const old=document.getElementById("attendanceSheetPage");
+  if(old) old.remove();
+
+  const page=document.createElement("div");
+  page.id="attendanceSheetPage";
+  page.style.cssText="position:fixed;inset:0;background:#eef2f7;z-index:100001;overflow:auto";
+
+  page.innerHTML=`
+    <div class="top" style="position:relative;top:auto;z-index:10">
+      <div><h1>BCSM Batch Attendance System</h1><small>ATTENDANCE SHEET — Name, Father Name & Course only</small></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn gray" id="changeAP">CHANGE PASSWORD</button>
+        <button class="btn" id="closeAP">← BACK</button>
+      </div>
+    </div>
+    <div class="controls" style="position:relative;top:auto;z-index:9">
+      <div class="field"><label>Batch</label><select id="asBatch"></select></div>
+      <div class="field"><label>Month</label><select id="asMonth"></select></div>
+      <div class="field"><label>Year</label><input id="asYear" type="number" min="2020" max="2100"></div>
+    </div>
+    <div class="notice"><b>Attendance:</b> cell पर click करके Blank → P → A → H → Blank करें। Contact numbers यहाँ जानबूझकर नहीं दिखाए गए हैं।</div>
+    <div class="wrap">
+      <div class="sheet-shell">
+        <div id="asTitle" class="sheet-title"></div>
+        <div class="section-title">ATTENDANCE SHEET</div>
+        <div class="section-title" style="position:sticky;top:0;z-index:30"><span id="asRedTitle"></span> &nbsp; | &nbsp; STUDENT DETAILS & ATTENDANCE</div><div class="table-wrap" style="height:calc(100vh - 130px);max-height:calc(100vh - 130px);min-height:220px"><table id="asTable"></table></div>
+        <div id="asSummary" class="summary"></div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(page);
+
+  const bs=page.querySelector("#asBatch"), ms=page.querySelector("#asMonth"), ys=page.querySelector("#asYear");
+  BATCHES.forEach((b,i)=>bs.add(new Option(b,b)));
+  MONTHS.forEach((m,i)=>ms.add(new Option(m,i)));
+  bs.value=currentBatch; ms.value=currentMonth; ys.value=currentYear;
+
+  function renderAS(){
+    const batch=bs.value, month=Number(ms.value), year=Number(ys.value)||currentYear;
+    const students=(db[batch]&&Array.isArray(db[batch].students))?db[batch].students:[];
+    const n=new Date(year,month+1,0).getDate();
+    const title=page.querySelector("#asTitle");
+    const table=page.querySelector("#asTable");
+    title.textContent=`${batch} — ${MONTHS[month].toUpperCase()} ${year}`;
+    const redTitle=page.querySelector("#asRedTitle"); if(redTitle) redTitle.textContent=title.textContent;
+
+    let h=`<thead><tr>
+      <th class="fixed sr">SR.NO</th><th class="fixed name">Name</th><th class="fixed father">Father Name</th><th class="fixed course">COURSE</th>`;
+    for(let d=1;d<=n;d++){
+      const wd=new Date(year,month,d).getDay();
+      h+=`<th class="day">${DAYS[wd]}<br>${d}</th>`;
+    }
+    h+=`<th>Present</th><th>Absent</th><th>%</th></tr></thead><tbody>`;
+
+    students.forEach((s,i)=>{
+      s.att=s.att||{};
+      let p=0,a=0;
+      h+=`<tr><td class="fixed sr">${i+1}</td>
+        <td class="fixed name">${esc(s.name||"")}</td>
+        <td class="fixed father">${esc(s.father||"")}</td>
+        <td class="fixed course">${esc(s.course||"")}</td>`;
+      for(let d=1;d<=n;d++){
+        const k=`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        const v=String(s.att[k]||"").trim().toUpperCase();
+        if(v==="P")p++; if(v==="A")a++;
+        h+=`<td class="att ${v.toLowerCase()}" data-student="${i}" data-day="${d}">${v}</td>`;
+      }
+      const marked=p+a, pct=marked?((p/marked)*100).toFixed(1):"0.0";
+      h+=`<td>${p}</td><td>${a}</td><td>${pct}%</td></tr>`;
+    });
+    h+=`</tbody>`;
+    table.innerHTML=h;
+
+    table.querySelectorAll("td.att").forEach(cell=>{
+      cell.onclick=()=>{
+        const i=Number(cell.dataset.student), d=Number(cell.dataset.day);
+        const s=students[i]; s.att=s.att||{};
+        const k=`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+        const v=String(s.att[k]||"").toUpperCase();
+        const next=v===""?"P":v==="P"?"A":v==="A"?"H":"";
+        if(next)s.att[k]=next; else delete s.att[k];
+        save();
+        renderAS();
+        renderAbsenceAlert();
+      };
+    });
+
+    let pAll=0,aAll=0;
+    students.forEach(s=>Object.values(s.att||{}).forEach(v=>{if(v==="P")pAll++;if(v==="A")aAll++}));
+    page.querySelector("#asSummary").innerHTML=`<span class="badge">Students: <b>${students.length}</b></span><span class="badge">Present marks: <b>${pAll}</b></span><span class="badge">Absent marks: <b>${aAll}</b></span>`;
+  }
+
+  bs.onchange=renderAS; ms.onchange=renderAS; ys.onchange=renderAS;
+  page.querySelector("#closeAP").onclick=()=>page.remove();
+  page.querySelector("#changeAP").onclick=changeAttendancePassword;
+  renderAS();
+}
+
+function render(){
+  ensureBatch();
+  const batchSelect=document.getElementById("batch");
+  if(batchSelect) batchSelect.value=BATCHES[currentBatch];
+  document.getElementById("sheetTitle").textContent=`${BATCHES[currentBatch]||""} — ${MONTHS[currentMonth].toUpperCase()} ${currentYear}`;
+  document.getElementById("sectionBatchTitle").textContent=`${BATCHES[currentBatch]||""} — ${MONTHS[currentMonth].toUpperCase()} ${currentYear}`;
+  const n=daysInMonth(), students=studentData().filter(s=>s._studentData===true), t=document.getElementById("sheet");
+  let h='<thead><tr>';
+  h+='<th class="fixed sr">SR.NO</th><th class="fixed name">Student Name</th><th class="fixed father">Father Name</th>';
+  for(let d=1;d<=n;d++){let wd=new Date(currentYear,currentMonth,d).getDay();h+=`<th class="day">${DAYS[wd]}<br>${d}</th>`}
+  h+='<th>Present</th><th>Absent</th><th>%</th></tr></thead><tbody>';
+  students.forEach((s,i)=>{
+    const realIndex=studentData().indexOf(s);
+    s.att=s.att||{};
+    let p=0,a=0;
+    for(let d=1;d<=n;d++){let v=s.att[dateKey(d)];if(v==="P")p++;if(v==="A")a++}
+    let marked=p+a, pct=marked?((p/marked)*100).toFixed(1):"0.0";
+    h+=`<tr>
+      <td class="fixed sr">${i+1}</td>
+      <td class="fixed name">${esc(s.name||"")}</td>
+      <td class="fixed father">${esc(s.father||"")}</td>`;
+    for(let d=1;d<=n;d++){
+      let k=dateKey(d),v=String(s.att[k]||"").trim().toUpperCase();
+      h+=`<td class="att ${v.toLowerCase()}" onclick="cycle(${realIndex},${d})" style="position:relative;padding-bottom:25px">${v}<button type="button" title="${v==='A'?'Absent date SMS खोलें':'पहले attendance में A लगाएँ'}" onclick="event.stopPropagation();${v==='A'?`sendSMS(${realIndex},${d})`:'return false'}" style="position:absolute;left:50%;bottom:2px;transform:translateX(-50%);font-size:11px;line-height:16px;padding:0 4px;border:1px solid ${v==='A'?'#b00000':'#aaa'};border-radius:3px;background:${v==='A'?'#e00000':'#ddd'};color:${v==='A'?'#fff':'#888'};font-weight:700;cursor:${v==='A'?'pointer':'default'}" ${v==='A'?'':'disabled'}>SMS</button></td>`;
+    }
+    h+=`<td>${p}</td><td>${a}</td><td>${pct}%</td></tr>`;
+  });
+  h+='</tbody>'; t.innerHTML=h;
+  let totalP=0,totalA=0;
+  students.forEach(s=>Object.values(s.att||{}).forEach(v=>{if(v==="P")totalP++;if(v==="A")totalA++}));
+  renderAbsenceAlert();
+  document.getElementById("summary").innerHTML=`<span class="badge">Students: <b>${students.length}</b></span><span class="badge">Present marks: <b>${totalP}</b></span><span class="badge">Absent marks: <b>${totalA}</b></span><span class="badge">Month: <b>${MONTHS[currentMonth]} ${currentYear}</b></span>`;
+  save();
+}
+function esc(x){return String(x).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;")}
+function setVal(i,k,v){studentData()[i][k]=v;save()}
+function cycle(i,d){
+  const s=studentData()[i];s.att=s.att||{};const k=dateKey(d),v=s.att[k]||"";
+  const next=v===""?"P":v==="P"?"A":v==="A"?"H":"";
+  if(next)s.att[k]=next;else delete s.att[k];
+  save();
+  render();
+}
+function newStudent(){
+  ensureBatch(); studentData().push({name:"",father:"",course:"",contact:"",guardian:"",att:{}}); render();
+  setTimeout(()=>{const inputs=document.querySelectorAll('td.name input'); if(inputs.length) inputs[inputs.length-1].focus()},50);
+}
+function clearMonth(){
+  if(!confirm(`क्या ${MONTHS[currentMonth]} ${currentYear} की इस batch की attendance साफ करनी है?`))return;
+  studentData().forEach(s=>{s.att=s.att||{};for(let d=1;d<=daysInMonth();d++)delete s.att[dateKey(d)]});render();
+}
+function sendSMS(i,d){
+  const s=studentData()[i];
+  const k=dateKey(d);
+  if(String((s.att||{})[k]||"").trim().toUpperCase()!=="A") return;
+  const number=String(s.guardian||s.contact||"").trim();
+  if(!number){alert("इस student का Father / Guardian Contact या Student Contact दर्ज नहीं है।");return}
+  const dateText=`${String(d).padStart(2,"0")} ${MONTHS[currentMonth]} ${currentYear}`;
+  const msg=`प्रिय अभिभावक, ${s.name||"आपका बच्चा"} ${dateText} को BCSM Computer Education Center में अनुपस्थित है। कृपया अनुपस्थिति का कारण सुनिश्चित करें। – BCSM`;
+  window.location.href="sms:"+encodeURIComponent(number)+"?body="+encodeURIComponent(msg);
+}
+function exportExcel(){
+  try{
+    save();
+    const n=daysInMonth();
+    let out='<html><head><meta charset="UTF-8"></head><body>';
+
+    BATCHES.forEach(batch=>{
+      const students=(db[batch] && Array.isArray(db[batch].students)) ? db[batch].students : [];
+      out+=`<table border="1" style="border-collapse:collapse;margin-bottom:25px"><tr><th colspan="${n+10}">${esc(batch)} - ${MONTHS[currentMonth]} ${currentYear}</th></tr>`;
+      out+='<tr><th>SR.NO</th><th>Name</th><th>Father Name</th><th>Course</th><th>Student Contact</th><th>Father / Guardian Contact</th>';
+      for(let d=1;d<=n;d++) out+=`<th>${d}</th>`;
+      out+='<th>Present</th><th>Absent</th><th>%</th><th>SMS</th></tr>';
+
+      students.forEach((st,i)=>{
+        let p=0,a=0;
+        out+=`<tr><td>${i+1}</td><td>${esc(st.name||"")}</td><td>${esc(st.father||"")}</td><td>${esc(st.course||"")}</td><td>${esc(st.contact||"")}</td><td>${esc(st.guardian||"")}</td>`;
+        for(let d=1;d<=n;d++){
+          const k=`${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          const v=String((st.att||{})[k]||"").trim().toUpperCase();
+          if(v==='P')p++;
+          if(v==='A')a++;
+          out+=`<td>${v}</td>`;
+        }
+        out+=`<td>${p}</td><td>${a}</td><td>${p+a?((p/(p+a))*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
+      });
+      out+='</table>';
+    });
+
+    out+='</body></html>';
+    const blob=new Blob(["\uFEFF",out],{type:'application/vnd.ms-excel'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`BCSM_ALL_BATCHES_${MONTHS[currentMonth]}_${currentYear}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},1500);
+  }catch(err){
+    alert('Excel export में समस्या हुई: '+err.message);
+  }
+}
+
+function exportCSV(){
+  const n=daysInMonth(), students=studentData();let rows=[];
+  let head=["SR.NO","Name","Father Name","Course","Student Contact","Father / Guardian Contact"];for(let d=1;d<=n;d++)head.push(d);head.push("Present","Absent","%");
+  rows.push(head);
+  students.forEach((s,i)=>{let p=0,a=0,row=[i+1,s.name||"",s.father||"",s.course||"",s.contact||"",s.guardian||""];for(let d=1;d<=n;d++){let v=(s.att||{})[dateKey(d)]||"";if(v==="P")p++;if(v==="A")a++;row.push(v)}row.push(p,a,(p+a?((p/(p+a))*100).toFixed(1):"0.0")+"%");rows.push(row)});
+  const csv="\uFEFF"+rows.map(r=>r.map(x=>`"${String(x).replaceAll('"','""')}"`).join(",")).join("\r\n");
+  downloadBlob(csv,`${safe(key())}_${MONTHS[currentMonth]}_${currentYear}.csv`,"text/csv;charset=utf-8");
+}
+function safe(x){return x.replace(/[\\/:*?"<>|]/g,"_")}
+function downloadBlob(data,name,type){
+  const blob=new Blob([data],{type:type});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=name;
+  a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+
+function backup(){downloadBlob(JSON.stringify({version:2,exportedAt:new Date().toISOString(),data:db},null,2),"BCSM_Attendance_Backup.json","application/json")}
+function restore(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const x=JSON.parse(r.result);
+      const restored=x.data||x;
+      if(!confirm("Restore करने पर current cloud data replace होगा. Continue?"))return;
+      db=restored||{};
+      cloudReady=true;
+      render();
+      save();
+      alert("Restore complete. Cloud में save हो गया।");
+    }catch(e){alert("Invalid backup file.")}
+  };
+  r.readAsText(file)
+}
+
+const BCSM_LOGIN_EMAIL = "bcsmcomputer.iteducation@gmail.com";
+const GMAIL_OTP_API_URL = "https://script.google.com/macros/s/AKfycbxFKXnCzJVRhzN5eSp64szToj8wHcpjAkeXoGidjdYsCALhEN1upFzpchPP-mTggOeD4A/exec";
+const PASSWORD_RECOVERY_EMAIL = BCSM_LOGIN_EMAIL;
+
+async function loginWithFirebase(){
+  const password=String(document.getElementById("mainPasswordInput").value||"");
+  const msg=document.getElementById("mainPasswordMsg");
+  if(!password){msg.textContent="Password डालें।";return;}
+  msg.textContent="Login हो रहा है…";
+  try{
+    await firebaseAuth.signInWithEmailAndPassword(BCSM_LOGIN_EMAIL,password);
+    document.getElementById("mainPasswordInput").value="";
+    msg.textContent="";
+  }catch(e){
+    console.error(e);
+    msg.textContent=(e.code==="auth/invalid-credential"||e.code==="auth/wrong-password")?"Password गलत है।":(e.message||"Login failed.");
+  }
+}
+
+function logoutFirebase(){
+  firebaseDB.ref(CLOUD_DB_PATH).off();
+  cloudReady=false;
+  firebaseAuth.signOut().catch(e=>alert("Logout नहीं हो पाया: "+e.message));
+}
+
+function updateLoginOverlay(user){
+  const overlay=document.getElementById("mainPasswordOverlay");
+  const password=document.getElementById("mainPasswordInput");
+  const old=document.getElementById("bcsmLogoutBtn");
+  if(user){
+    overlay.style.display="none";
+    if(!old){
+      const btn=document.createElement("button");
+      btn.id="bcsmLogoutBtn";
+      btn.className="btn gray";
+      btn.textContent="LOGOUT";
+      btn.onclick=logoutFirebase;
+      document.querySelector(".top").appendChild(btn);
+    }
+  }else{
+    overlay.style.display="flex";
+    if(password){password.value="";setTimeout(()=>password.focus(),50);}
+    if(old)old.remove();
+  }
+}
+
+firebaseAuth.onAuthStateChanged(async user=>{
+  if(user){
+    updateLoginOverlay(user);
+    await loadCloudData();
+    if(firebaseAuth.currentUser) startCloudSync();
+  }else{
+    cloudReady=false;
+    cloudLoading=false;
+    db={};
+    updateLoginOverlay(null);
+  }
+});
+
+function otpApi(action, otp){
+  return new Promise((resolve,reject)=>{
+    if(!GMAIL_OTP_API_URL || GMAIL_OTP_API_URL.includes("PASTE_APPS_SCRIPT")){
+      reject(new Error("Gmail OTP API URL अभी सेट नहीं है।"));
+      return;
+    }
+    const callback="bcsmOtpCallback_"+Date.now()+"_"+Math.floor(Math.random()*100000);
+    const script=document.createElement("script");
+    const timer=setTimeout(()=>{cleanup();reject(new Error("OTP service timeout."));},20000);
+    function cleanup(){clearTimeout(timer);try{delete window[callback]}catch(e){}if(script.parentNode)script.parentNode.removeChild(script);}
+    window[callback]=(data)=>{cleanup();if(data&&data.ok)resolve(data);else reject(new Error((data&&data.message)||"OTP service error."));};
+    script.src=GMAIL_OTP_API_URL+"?action="+encodeURIComponent(action)+"&otp="+encodeURIComponent(otp||"")+"&email="+encodeURIComponent(PASSWORD_RECOVERY_EMAIL)+"&callback="+encodeURIComponent(callback)+"&_="+Date.now();
+    script.onerror=()=>{cleanup();reject(new Error("Gmail OTP service connect नहीं हो पाया।"));};
+    document.head.appendChild(script);
+  });
+}
+
+async function changeAttendancePassword(){
+  if(!firebaseAuth.currentUser){alert("पहले Login करें।");return;}
+  try{
+    await otpApi("send");
+    alert("6-digit OTP इस Gmail पर भेज दिया गया है:\n\n"+PASSWORD_RECOVERY_EMAIL);
+  }catch(e){
+    const m=String(e.message||"");
+    if(m.toLowerCase().includes("please wait before requesting another otp")){
+      alert("नया OTP अभी नहीं भेजा जा सकता। पहले भेजा गया OTP अभी valid हो सकता है। उसी OTP को यहाँ डालें।\n\nGmail: "+PASSWORD_RECOVERY_EMAIL);
+    }else{
+      alert("OTP भेजने में समस्या: "+m);
+      return;
+    }
+  }
+  const otp=prompt("Gmail पर आया 6-digit OTP डालें:");
+  if(otp===null)return;
+  if(!/^\d{6}$/.test(String(otp).trim())){alert("कृपया 6-digit OTP डालें।");return;}
+  try{
+    await otpApi("verify",String(otp).trim());
+  }catch(e){
+    alert("OTP गलत या expire हो चुका है।");
+    return;
+  }
+  const newPassword=prompt("OTP verify हो गया। नया password डालें:");
+  if(newPassword===null)return;
+  if(String(newPassword).length<6){alert("Password कम से कम 6 characters का होना चाहिए।");return;}
+
+  const confirmPassword=prompt("Confirm Password फिर से डालें:");
+  if(confirmPassword===null)return;
+  if(newPassword!==confirmPassword){alert("New Password और Confirm Password समान नहीं हैं।");return;}
+
+  try{
+    await firebaseAuth.currentUser.updatePassword(newPassword);
+    alert("Password successfully change हो गया। अब अगली बार इसी नए password से Login करें।");
+  }catch(e){
+    console.error(e);
+    if(e.code==="auth/requires-recent-login") {
+      alert("Security के कारण इस login session को दोबारा verify करना जरूरी है। कृपया Logout करके फिर Login करें और तुरंत CHANGE PASSWORD से दोबारा प्रयास करें।");
+    } else {
+      alert("Password change नहीं हो पाया: "+(e.message||"Unknown error"));
+    }
+  }
+}
+
+document.addEventListener("DOMContentLoaded",()=>{
+  const b=document.getElementById("mainPasswordOpen"), i=document.getElementById("mainPasswordInput");
+  if(b)b.onclick=loginWithFirebase;
+  if(i)i.addEventListener("keydown",e=>{if(e.key==="Enter")loginWithFirebase()});
+  init();
+  setTimeout(()=>{if(i && !firebaseAuth.currentUser)i.focus()},200);
+  document.getElementById("exportExcelBtn").addEventListener("click",exportExcel);
+  const absenceButton=document.getElementById("absenceBtn"); if(absenceButton) absenceButton.addEventListener("click",showAbsencePage);
+  document.getElementById("overallSummaryBtn").addEventListener("click",showOverallSummaryPage);
+});
+</script>
+</body>
+</html>
