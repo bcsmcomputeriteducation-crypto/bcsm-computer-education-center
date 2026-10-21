@@ -1,6 +1,5 @@
-
 {
-  "name": "bcsm-password-otp",
+  "name": "bcsm-role-auth",
   "private": true,
   "engines": {
     "node": "20"
