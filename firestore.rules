@@ -2,14 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function roleIs(role) { return signedIn() && request.auth.token.role == role; }
+    // Role accounts are created manually in Firebase Authentication only.
+    // Gmail plus-address aliases all deliver to the institute inbox.
+    function roleIs(role) {
+      return signedIn() && (
+        (role == 'admin' && request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com') ||
+        (role == 'instituteAdmin' && request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com') ||
+        (role == 'teacher' && request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com')
+      );
+    }
     function isAdmin() { return roleIs('admin'); }
     function isInstituteAdmin() { return roleIs('instituteAdmin'); }
     function canManageInstitute() { return isAdmin() || isInstituteAdmin(); }
 
     match /roleCredentials/{role} { allow read, write: if false; }
     match /rolePasswordResets/{token} { allow read, write: if false; }
-
     match /students/{uid} {
       allow create: if signedIn() && request.auth.uid == uid && request.resource.data.role == 'student';
       allow read: if (signedIn() && request.auth.uid == uid) || canManageInstitute() || roleIs('teacher');
@@ -20,18 +27,9 @@ service cloud.firestore {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
     }
-    match /teachers/{id} {
-      allow read: if canManageInstitute() || roleIs('teacher');
-      allow write: if canManageInstitute();
-    }
-    match /courses/{id} {
-      allow read: if true;
-      allow write: if canManageInstitute();
-    }
-    match /admissions/{id} {
-      allow read, create, update: if canManageInstitute() || roleIs('teacher');
-      allow delete: if canManageInstitute();
-    }
+    match /teachers/{id} { allow read: if canManageInstitute() || roleIs('teacher'); allow write: if canManageInstitute(); }
+    match /courses/{id} { allow read: if true; allow write: if canManageInstitute(); }
+    match /admissions/{id} { allow read, create, update: if canManageInstitute() || roleIs('teacher'); allow delete: if canManageInstitute(); }
     match /results/{id} {
       allow read: if canManageInstitute() || roleIs('teacher') || (signedIn() && resource.data.studentUid == request.auth.uid);
       allow create, update, delete: if canManageInstitute();
