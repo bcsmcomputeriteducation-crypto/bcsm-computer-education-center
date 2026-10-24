@@ -2,17 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isMainAdmin() { return signedIn() && request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com'; }
+    // Role accounts are created manually in Firebase Authentication only.
+    // Gmail plus-address aliases all deliver to the institute inbox.
+    function roleIs(role) {
+      return signedIn() && (
+        (role == 'admin' && request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com') ||
+        (role == 'instituteAdmin' && request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com') ||
+        (role == 'teacher' && request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com')
+      );
+    }
+    function isAdmin() { return roleIs('admin'); }
+    function isInstituteAdmin() { return roleIs('instituteAdmin'); }
+    function canManageInstitute() { return isAdmin() || isInstituteAdmin(); }
+
+    match /roleCredentials/{role} { allow read, write: if false; }
+    match /rolePasswordResets/{token} { allow read, write: if false; }
+    match /students/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid && request.resource.data.role == 'student';
+      allow read: if (signedIn() && request.auth.uid == uid) || canManageInstitute() || roleIs('teacher');
+      allow update: if (signedIn() && request.auth.uid == uid && request.resource.data.uid == uid && request.resource.data.role == 'student') || canManageInstitute() || roleIs('teacher');
+      allow delete: if canManageInstitute();
+    }
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /teachers/{id} { allow read: if canManageInstitute() || roleIs('teacher'); allow write: if canManageInstitute(); }
+    match /courses/{id} { allow read: if true; allow write: if canManageInstitute(); }
+    match /admissions/{id} { allow read, create, update: if canManageInstitute() || roleIs('teacher'); allow delete: if canManageInstitute(); }
+    match /results/{id} {
+      allow read: if canManageInstitute() || roleIs('teacher') || (signedIn() && resource.data.studentUid == request.auth.uid);
+      allow create, update, delete: if canManageInstitute();
+    }
+    // Monthly Main Exam approval requests: requests can be submitted without student login,
+    // but only the dedicated Main Admin account can list or approve/deny them.
     match /monthlyExamRequests/{requestId} {
-      allow create: if request.resource.data.keys().hasAll(['studentName','courseId','courseName','semester','batch','examType','status','requestedAt'])
+      allow create: if request.resource.data.keys().hasAll([
+          'studentName','courseId','courseName','semester','batch','examType',
+          'status','requestToken','requestedAt','createdAt'
+        ])
         && request.resource.data.status == 'pending'
         && request.resource.data.examType == 'Monthly Main Exam'
         && request.resource.data.studentName is string
         && request.resource.data.studentName.size() > 0
+        && request.resource.data.courseId is string
+        && request.resource.data.semester is string
+        && request.resource.data.requestToken == requestId
         && request.resource.data.batch in ['7 TO 9','9 TO 11','11 TO 01','01 TO 03','03 TO 05'];
       allow get: if isMainAdmin() || resource.data.requestToken == requestId;
       allow list: if isMainAdmin();
-      allow update: if isMainAdmin() && request.resource.data.status in ['approved','denied']
+      allow update: if isMainAdmin()
+        && request.resource.data.status in ['approved','denied']
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','approvedAt','approvedBy']);
       allow delete: if isMainAdmin();
     }
