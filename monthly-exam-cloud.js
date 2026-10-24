@@ -1,0 +1,20 @@
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { firebaseConfig } from "./firebase-config.js";
+const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
+const coll=collection(firestore,"monthlyExamRequests");
+const errText=e=>({"permission-denied":"Firebase Firestore Rules publish karein aur main Admin account se login karein.","unauthenticated":"Admin ko dobara login karna hoga."}[e?.code]||e?.message||"Online request fail hui.");
+const api={
+ async createRequest(p){const id=crypto.randomUUID();const data={...p,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};await setDoc(doc(firestore,"monthlyExamRequests",id),data);return {id,...data};},
+ watchRequest(id,callback){const ref=doc(firestore,"monthlyExamRequests",id);return onSnapshot(ref,s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>console.error("Exam request listener:",errText(e)));},
+ async setRequestStatus(id,status){const user=auth.currentUser;if(!user||user.email!=="bcsmcomputer.iteducation+admin@gmail.com")throw new Error("Sirf Main Admin login se approval diya ja sakta hai; Institute Admin se nahi.");if(!["approved","denied"].includes(status))throw new Error("Invalid status");await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:user.email});},
+ watchAdminRequests(callback){const user=auth.currentUser;if(!user||user.email!=="bcsmcomputer.iteducation+admin@gmail.com")return ()=>{};return onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>console.error("Admin request feed:",errText(e)));}
+};
+window.BCSMExamCloud=api;
+let adminUnsub=null, latestRows=[];
+function renderApprovalCardIfNeeded(){const el=document.getElementById("adminContent");if(!el||!document.body.innerText.includes("Exams management screen"))return;let old=el.querySelector("#cloudApprovalFeed");if(old){old.innerHTML=renderRows(latestRows);return;}const card=document.createElement("div");card.className="card";card.innerHTML="<h3>Online Monthly Main Exam Approval Requests (Main Admin)</h3><div id=\"cloudApprovalFeed\"></div>";el.prepend(card);card.querySelector("#cloudApprovalFeed").innerHTML=renderRows(latestRows);}
+function attachAdminFeed(){if(adminUnsub){adminUnsub();adminUnsub=null;}const role=window.__bcsmFirebaseRole;if(auth.currentUser?.email==="bcsmcomputer.iteducation+admin@gmail.com"&&role!=="instituteAdmin"){adminUnsub=api.watchAdminRequests(rows=>{latestRows=rows;renderApprovalCardIfNeeded();});}}
+function renderRows(rows){return `<div class="tablewrap"><table><thead><tr><th>Student</th><th>Course / Semester</th><th>Batch</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.studentName)}<br>${escapeHtml(r.studentPhone||'')}</td><td>${escapeHtml(r.courseName||r.courseId)} / ${escapeHtml(r.semester)}</td><td>${escapeHtml(r.batch)}</td><td>${escapeHtml(r.status)}</td><td>${r.status==='pending'?`<button class="small primary" onclick="approveExamRequest('${r.id}')">Approve</button> <button class="small danger" onclick="denyExamRequest('${r.id}')">Deny</button>`:'—'}</td></tr>`).join('')||'<tr><td colspan="5">Abhi koi online request nahi hai.</td></tr>'}</tbody></table></div>`}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+new MutationObserver(()=>renderApprovalCardIfNeeded()).observe(document.body,{childList:true,subtree:true});auth.onAuthStateChanged(()=>setTimeout(attachAdminFeed,150));window.addEventListener('bcsm-firebase-ready',()=>setTimeout(attachAdminFeed,150));
