@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
 const coll=collection(firestore,"monthlyExamRequests");
@@ -8,8 +9,8 @@ const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"
 const api={
  async createRequest(p){const id=crypto.randomUUID();const user=auth.currentUser;if(!user)throw new Error("Student ko pehle login karna hoga.");const data={...p,studentUid:user.uid,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};await setDoc(doc(firestore,"monthlyExamRequests",id),data);return {id,...data};},
  watchRequest(id,callback){return onSnapshot(doc(firestore,"monthlyExamRequests",id),s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>console.error("Exam request listener:",e));},
- async setRequestStatus(id,status){const user=auth.currentUser;if(!user)throw new Error("Main Admin login karein.");const aSnap=await getDoc(doc(firestore,"admins",user.uid));const a=aSnap.exists()?aSnap.data():{};if(a.role!=="admin"||a.active!==true||a.role==="instituteAdmin")throw new Error("Sirf active Main Admin approve kar sakta hai; Institute Admin nahi.");if(!["approved","denied"].includes(status))throw new Error("Invalid status");await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:user.email||user.uid});},
- watchAdminRequests(callback){const user=auth.currentUser;if(!user)return ()=>{};let active=true,unsub=null;getDoc(doc(firestore,"admins",user.uid)).then(adminSnap=>{if(!active)return;const a=adminSnap.exists()?adminSnap.data():{};if(a.role!=="admin"||a.active!==true){callback([]);console.warn("Approval feed requires admins/{uid} role=admin and active=true");return;}unsub=onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error("Admin request feed:",e);callback([]);});}).catch(e=>{console.error("Admin role check failed:",e);callback([])});return ()=>{active=false;if(unsub)unsub();};}
+ async setRequestStatus(id,status){const user=auth.currentUser;if(!user)throw new Error("Main Admin login karein.");if(user.email!=="bcsmcomputer.iteducation+admin@gmail.com"||window.__bcsmFirebaseRole!=="admin")throw new Error("Sirf Main Admin approve kar sakta hai; Institute Admin nahi.");if(!["approved","denied"].includes(status))throw new Error("Invalid status");await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:user.email});},
+ watchAdminRequests(callback){const user=auth.currentUser;if(!user||user.email!=="bcsmcomputer.iteducation+admin@gmail.com"||window.__bcsmFirebaseRole!=="admin"){callback([]);return ()=>{};}return onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>{console.error("Admin request feed:",e);callback([]);});}
 };
 window.BCSMExamCloud=api;
 let adminUnsub=null, latestRows=[];
@@ -19,4 +20,4 @@ function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse")
 window.approveExamRequest=async id=>{try{await api.setRequestStatus(id,"approved");}catch(e){alert("Approval failed: "+(e.message||e));}};
 window.denyExamRequest=async id=>{try{await api.setRequestStatus(id,"denied");}catch(e){alert("Deny failed: "+(e.message||e));}};
 const observer=new MutationObserver(()=>{if(document.getElementById("eCourse")&&!document.getElementById("cloudApprovalFeed"))attachAdminFeed();else if(!document.getElementById("eCourse")&&adminUnsub){adminUnsub();adminUnsub=null;}});observer.observe(document.body,{childList:true,subtree:true});
-auth.onAuthStateChanged(()=>setTimeout(attachAdminFeed,150));window.addEventListener("bcsm-firebase-ready",()=>setTimeout(attachAdminFeed,150));
+onAuthStateChanged(auth,()=>setTimeout(attachAdminFeed,150));window.addEventListener("bcsm-firebase-ready",()=>setTimeout(attachAdminFeed,150));
