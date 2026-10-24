@@ -1,51 +1,53 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
+    function signedIn() { return request.auth != null; }
     function isMainAdmin() {
-      return request.auth != null
-        && request.auth.token.email == "bcsmcomputer.iteducation+admin@gmail.com";
+      return signedIn() && request.auth.token.email == "bcsmcomputer.iteducation+admin@gmail.com";
     }
-
-    function isAdmin() {
-      return request.auth != null
+    function isAdminRecord() {
+      return signedIn()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin"
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
+    function isAdmin() { return isMainAdmin() || isAdminRecord(); }
 
     match /students/{userId} {
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow read, update: if request.auth != null
-                          && (request.auth.uid == userId || isAdmin() || isMainAdmin());
-      allow delete: if isAdmin() || isMainAdmin();
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow read, update: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
     }
-
     match /admins/{userId} {
-      allow read: if request.auth != null
-                  && (request.auth.uid == userId || isAdmin() || isMainAdmin());
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow write: if false;
     }
-
     match /monthlyExamRequests/{requestId} {
-      allow create: if request.auth != null
-                    && request.resource.data.status == "pending"
-                    && request.resource.data.studentUid == request.auth.uid
-                    && request.resource.data.studentName is string
-                    && request.resource.data.courseName is string
-                    && request.resource.data.semester is string
-                    && request.resource.data.batch is string
-                    && request.resource.data.requestToken is string;
-
-      allow read: if isMainAdmin()
-                  || (request.auth != null
-                      && resource.data.studentUid == request.auth.uid);
-
+      allow create: if signedIn()
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.studentName is string
+        && request.resource.data.courseName is string
+        && request.resource.data.courseId is string
+        && request.resource.data.semester is string
+        && request.resource.data.batch is string
+        && request.resource.data.requestToken is string;
+      allow read: if isMainAdmin() || (signedIn() && resource.data.studentUid == request.auth.uid);
       allow update: if isMainAdmin()
-                    && request.resource.data.status in ["approved", "denied"]
-                    && request.resource.data.diff(resource.data).affectedKeys()
-                       .hasOnly(["status", "approvedAt", "approvedBy"]);
-
+        && request.resource.data.status in ["approved", "denied"]
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "approvedAt", "approvedBy"]);
+      allow delete: if isMainAdmin();
+    }
+    match /monthlyExamSettings/{courseId} {
+      allow read: if signedIn();
+      allow create, update: if isMainAdmin()
+        && request.resource.data.courseId == courseId
+        && request.resource.data.type == "Monthly Main Exam"
+        && request.resource.data.published == true
+        && request.resource.data.questionCount is number
+        && request.resource.data.duration is number
+        && request.resource.data.totalMarks is number
+        && request.resource.data.passMarks is number;
       allow delete: if isMainAdmin();
     }
   }
