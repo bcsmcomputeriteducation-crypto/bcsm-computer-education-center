@@ -1,36 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isMainAdmin() {
+      return request.auth != null
+        && request.auth.token.email == "bcsmcomputer.iteducation+admin@gmail.com";
+    }
+
     function isAdmin() {
       return request.auth != null
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == "admin"
         && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
+
     match /students/{userId} {
       allow create: if request.auth != null && request.auth.uid == userId;
-      allow read, update: if request.auth != null && (request.auth.uid == userId || isAdmin());
-      allow delete: if isAdmin();
+      allow read, update: if request.auth != null
+                          && (request.auth.uid == userId || isAdmin() || isMainAdmin());
+      allow delete: if isAdmin() || isMainAdmin();
     }
+
     match /admins/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow read: if request.auth != null
+                  && (request.auth.uid == userId || isAdmin() || isMainAdmin());
       allow write: if false;
     }
+
     match /monthlyExamRequests/{requestId} {
       allow create: if request.auth != null
-        && request.resource.data.status == "pending"
-        && request.resource.data.studentName is string
-        && request.resource.data.courseName is string
-        && request.resource.data.semester is string
-        && request.resource.data.batch is string
-        && request.resource.data.requestToken is string
-        && request.resource.data.studentUid == request.auth.uid;
-      allow read: if isAdmin() || (request.auth != null && resource.data.studentUid == request.auth.uid);
-      allow update: if isAdmin()
-        && request.resource.data.status in ["approved", "denied"]
-        && request.resource.data.requestToken == resource.data.requestToken
-        && request.resource.data.studentUid == resource.data.studentUid;
-      allow delete: if isAdmin();
+                    && request.resource.data.status == "pending"
+                    && request.resource.data.studentUid == request.auth.uid
+                    && request.resource.data.studentName is string
+                    && request.resource.data.courseName is string
+                    && request.resource.data.semester is string
+                    && request.resource.data.batch is string
+                    && request.resource.data.requestToken is string;
+
+      allow read: if isMainAdmin()
+                  || (request.auth != null
+                      && resource.data.studentUid == request.auth.uid);
+
+      allow update: if isMainAdmin()
+                    && request.resource.data.status in ["approved", "denied"]
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                       .hasOnly(["status", "approvedAt", "approvedBy"]);
+
+      allow delete: if isMainAdmin();
     }
   }
 }
