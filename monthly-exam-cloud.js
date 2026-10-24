@@ -4,7 +4,7 @@ import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, or
 import { firebaseConfig } from "./firebase-config.js";
 const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
 const coll=collection(firestore,"monthlyExamRequests");
-const errText=e=>({"permission-denied":"Firebase Firestore Rules publish karein aur main Admin account se login karein.","unauthenticated":"Admin ko dobara login karna hoga."}[e?.code]||e?.message||"Online request fail hui.");
+const errText=e=>({"permission-denied":"Firestore permission denied: Firebase Console mein existing Firestore Rules ke andar monthlyExamRequests rules add karke Publish karein. Rules publish hone ke baad page reload karein.","unauthenticated":"Admin ko dobara login karna hoga."}[e?.code]||e?.message||"Online request fail hui.");
 const api={
  async createRequest(p){const id=crypto.randomUUID();const data={...p,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};await setDoc(doc(firestore,"monthlyExamRequests",id),data);return {id,...data};},
  watchRequest(id,callback){const ref=doc(firestore,"monthlyExamRequests",id);return onSnapshot(ref,s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>console.error("Exam request listener:",errText(e)));},
