@@ -1,59 +1,130 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),store=getFirestore(app);
-const ROOT="appData",ADMIN_EMAILS={admin:"bcsmcomputer.iteducation+admin@gmail.com",instituteAdmin:"bcsmcomputer.iteducation+institute@gmail.com"};
-const ARRAY_KEYS=["teachers","playlists","examRequests","finalRegistrations","students","lessons","questions","exams","results","payments","courses"];
-let isPrivileged=false,loaded=false,applyingRemote=false,writing=false,unsub=null,cache=new Map(),timer=null,lastCloudSignature="";
-const errText=e=>e?.code==="permission-denied"?"Firestore permission denied. Firestore Rules publish karein aur official Admin/Institute Admin login verify karein.":e?.code==="resource-exhausted"?"Cloud data document limit hit hua. Photos/images ko database mein base64 ke roop mein na rakhein.":(e?.message||String(e));
-function roleFor(user){if(!user)return false;return Object.values(ADMIN_EMAILS).includes(String(user.email||"").toLowerCase())||!!window.__bcsmFirebaseRole&&["admin","instituteAdmin"].includes(window.__bcsmFirebaseRole)}
-function idFor(kind,id){return `${kind}__${encodeURIComponent(String(id))}`.slice(0,1400)}
-function normalizeDB(d){if(!d||typeof d!=="object")return null;const out={...d};for(const k of ARRAY_KEYS)if(!Array.isArray(out[k]))out[k]=[];if(!out.settings||typeof out.settings!=="object")return null;if(typeof out.examNotices!=="string")out.examNotices="";return out}
-function signature(v){try{return JSON.stringify(v)}catch{return ""}}
-function docsToDB(snap){const local=window.BCSMDataBridge?.getDB?.();if(!local)return null;const next={...local};for(const k of ARRAY_KEYS)next[k]=[];let settingsFound=false;
- for(const s of snap.docs){const d=s.data();if(d.kind==="settings"){next.settings=d.value||{};settingsFound=true}else if(d.kind==="examNotices"){next.examNotices=String(d.value||"")}else if(ARRAY_KEYS.includes(d.kind)&&d.value&&typeof d.value==="object"){next[d.kind].push(d.value)}}
- if(!settingsFound)return null;return normalizeDB(next)}
-function mergeFirstTimeLocal(remote,local){
- if(!remote)return normalizeDB(local);
- const merged={...remote};
- // Preserve local-only records from each computer once during its first cloud migration.
- for(const k of ARRAY_KEYS){const byId=new Map((remote[k]||[]).filter(x=>x&&x.id!=null).map(x=>[String(x.id),x]));for(const item of (local?.[k]||[])){if(item&&item.id!=null&&!byId.has(String(item.id)))byId.set(String(item.id),item)}merged[k]=[...byId.values()]}
- return normalizeDB(merged);
+const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
+const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings");
+const MAIN_ADMIN_EMAIL="bcsmcomputer.iteducation+admin@gmail.com";
+const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
+function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL)&&window.__bcsmFirebaseRole==="admin";}
+function friendlyAuthError(e){
+ if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
+ if(e?.code==="permission-denied")return "Firestore ne request rok di. Firebase Console → Firestore Database → Rules mein ZIP ki firestore.rules publish karein; Rules publish hue bina cross-device approval kaam nahi karega.";
+ if(e?.code==="unavailable"||e?.code==="deadline-exceeded")return "Firebase server se connection nahi ho raha. Internet check karke dobara try karein.";
+ return e?.message||String(e);
 }
-function cloudDocsFromDB(db){const out=[];out.push({id:"meta_settings",kind:"settings",value:db.settings||{}});out.push({id:"meta_examNotices",kind:"examNotices",value:db.examNotices||""});for(const k of ARRAY_KEYS){for(const item of db[k]||[]){if(item&&item.id!==undefined&&item.id!==null)out.push({id:idFor(k,item.id),kind:k,itemId:String(item.id),value:item})}}return out}
-async function replaceCloudFromLocal(db){const docs=cloudDocsFromDB(db);const largest=Math.max(0,...docs.map(d=>JSON.stringify(d).length));if(largest>850000){throw new Error("Cloud sync रोक दिया गया: एक रिकॉर्ड बहुत बड़ा है। विद्यार्थी/शिक्षक की फोटो छोटी रखें और वीडियो URL इस्तेमाल करें; वीडियो/फोटो को base64 में सेव न करें.")}
- const desired=new Map(docs.map(d=>[d.id,d]));const deletes=[...cache.keys()].filter(id=>!desired.has(id));
- for(let i=0;i<docs.length;i+=400){const batch=writeBatch(store);for(const d of docs.slice(i,i+400)){const old=cache.get(d.id);if(old&&signature(old.value)===signature(d.value)&&old.kind===d.kind&&old.itemId===d.itemId)continue;batch.set(doc(store,ROOT,d.id),{kind:d.kind,itemId:d.itemId||null,value:d.value,updatedAt:serverTimestamp(),updatedBy:auth.currentUser?.uid||""})}await batch.commit()}
- for(let i=0;i<deletes.length;i+=400){const batch=writeBatch(store);for(const id of deletes.slice(i,i+400))batch.delete(doc(store,ROOT,id));await batch.commit()}
- cache=desired;lastCloudSignature=signature(docs.map(d=>({id:d.id,kind:d.kind,itemId:d.itemId,value:d.value})));}
-function scheduleSave(db){if(!isPrivileged||!loaded||applyingRemote||writing)return;clearTimeout(timer);timer=setTimeout(async()=>{try{writing=true;await replaceCloudFromLocal(normalizeDB(db));setStatus("Online sync: saved",true)}catch(e){console.error("BCSM cloud data sync failed",e);setStatus("Cloud sync error: "+errText(e),false)}finally{writing=false}},700)}
-function setStatus(msg,ok){let el=document.getElementById("bcsmCloudSyncStatus");if(!el){el=document.createElement("div");el.id="bcsmCloudSyncStatus";el.style.cssText="position:fixed;bottom:10px;right:10px;z-index:99999;max-width:min(92vw,420px);padding:8px 12px;border-radius:9px;background:#17253a;color:white;font:12px/1.4 Arial,sans-serif;box-shadow:0 3px 15px #0002";document.body.appendChild(el)}el.textContent=msg;el.style.background=ok?"#17623a":"#8b2c20";}
-function start(user){isPrivileged=roleFor(user);loaded=false;if(unsub){unsub();unsub=null}cache.clear();if(!isPrivileged){setStatus("Cloud sync: admin login required",false);return}
- setStatus("Cloud sync: connecting…",true);unsub=onSnapshot(collection(store,ROOT),async snap=>{
-   try{
-    const remote=docsToDB(snap);
-    if(!loaded){
-      if(remote){
-      const local=normalizeDB(window.BCSMDataBridge?.getDB?.());
-      const migrationKey="bcsmCloudLocalMerge_v1";
-      if(!localStorage.getItem(migrationKey)){
-        const merged=mergeFirstTimeLocal(remote,local);
-        cache=new Map(snap.docs.map(s=>[s.id,{kind:s.data().kind,itemId:s.data().itemId||undefined,value:s.data().value}]));
-        applyingRemote=true;window.BCSMDataBridge?.applyCloudData(merged);applyingRemote=false;loaded=true;
-        await replaceCloudFromLocal(merged);localStorage.setItem(migrationKey,"1");setStatus("Online sync: local records merged",true);return;
-      }
-      cache=new Map(snap.docs.map(s=>[s.id,{kind:s.data().kind,itemId:s.data().itemId||undefined,value:s.data().value}]));lastCloudSignature=signature(snap.docs.map(s=>({id:s.id,kind:s.data().kind,itemId:s.data().itemId,value:s.data().value})));applyingRemote=true;window.BCSMDataBridge?.applyCloudData(remote);applyingRemote=false;loaded=true;setStatus("Online sync: cloud data loaded",true);return}
-      // Empty cloud: seed it exactly once from the first official admin's local database.
-      const local=normalizeDB(window.BCSMDataBridge?.getDB?.());if(!local)throw new Error("Local app data unavailable");loaded=true;cache=new Map();await replaceCloudFromLocal(local);localStorage.setItem("bcsmCloudLocalMerge_v1","1");setStatus("Online sync: initial data uploaded",true);return;
-    }
-    if(writing)return;
-    const sig=signature(snap.docs.map(s=>({id:s.id,kind:s.data().kind,itemId:s.data().itemId,value:s.data().value})));
-    if(sig===lastCloudSignature)return;
-    if(remote){cache=new Map(snap.docs.map(s=>[s.id,{kind:s.data().kind,itemId:s.data().itemId||undefined,value:s.data().value}]));lastCloudSignature=sig;applyingRemote=true;window.BCSMDataBridge?.applyCloudData(remote);applyingRemote=false;setStatus("Online sync: updates received",true)}
-   }catch(e){applyingRemote=false;console.error(e);setStatus("Cloud sync error: "+errText(e),false)}
- },e=>{console.error("appData listener failed",e);setStatus("Cloud sync error: "+errText(e),false)});
+async function ensureStudentSession(){
+ if(auth.currentUser){if(isMainAdmin())await signOut(auth);else return auth.currentUser;}
+ try{return (await signInAnonymously(auth)).user;}catch(e){throw new Error(friendlyAuthError(e));}
 }
-window.addEventListener("bcsm-local-db-saved",e=>scheduleSave(e.detail?.db));
-window.addEventListener("bcsm-monthly-cloud-results",e=>{if(!isPrivileged||!loaded)return;const db=window.BCSMDataBridge?.getDB?.();if(!db)return;const existing=new Map((db.results||[]).map(r=>[String(r.id),r]));for(const r of (e.detail?.results||[])){existing.set(String(r.id),r)}db.results=[...existing.values()];applyingRemote=true;window.BCSMDataBridge?.applyCloudData(db);applyingRemote=false;scheduleSave(db)});
-onAuthStateChanged(auth,user=>{start(user)});
+function identityValues(identity){
+ const raw=identity&&typeof identity==="object"?[
+   identity.courseKey,identity.courseCode,identity.courseName,identity.courseId,identity.course,
+   identity.courseCode&&identity.courseName?`${identity.courseCode} ${identity.courseName}`:""
+ ]:[identity];
+ return [...new Set(raw.filter(v=>v!==undefined&&v!==null&&String(v).trim()).flatMap(v=>[String(v).trim(),courseKey(v)]).filter(Boolean))];
+}
+function matchesIdentity(settings,identity){
+ const wanted=new Set(identityValues(identity).map(courseKey));
+ const values=[settings.courseKey,settings.courseId,settings.courseCode,settings.courseName,settings.id];
+ return values.some(v=>v!==undefined&&v!==null&&wanted.has(courseKey(v)));
+}
+const api={
+ async createRequest(p){
+   const user=await ensureStudentSession(),key=courseKey(p.courseCode||p.courseName||p.courseId);
+   if(!key)throw new Error("Course ki pehchan nahi mili. Course dobara select karein.");
+   const id=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==="function")?globalThis.crypto.randomUUID():"req-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,12);
+   const data={...p,courseKey:key,studentUid:user.uid,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};
+   await setDoc(doc(firestore,"monthlyExamRequests",id),data);return {id,...data};
+ },
+ watchRequest(id,callback){return onSnapshot(doc(firestore,"monthlyExamRequests",id),s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>{
+   console.error("Exam request listener:",e);const status=document.getElementById("meRequestStatus");
+   if(status)status.innerHTML='<div class="error">Approval status load nahi hua: '+esc(friendlyAuthError(e))+'</div>';
+ });},
+ async saveCourseExamSettings(x){
+   if(!isMainAdmin())throw new Error("Main Admin Firebase login verify nahi hua. Official Main Admin account se dobara login karein.");
+   const code=String(x.courseCode||x.code||"").trim(),name=String(x.courseName||x.name||"").trim(),id=String(x.courseId||"").trim();
+   const key=courseKey(code||name||id);if(!key)throw new Error("Course code/ID nahi mila. Course select karke dobara save karein.");
+   const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks);
+   if(!Number.isFinite(questionCount)||questionCount<1||!Number.isFinite(duration)||duration<1||!Number.isFinite(totalMarks)||totalMarks<1||!Number.isFinite(passMarks)||passMarks<0)throw new Error("Questions, duration aur marks ki settings check karein.");
+   const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
+   // Write canonical code key and compatibility aliases so old requests using course ID/name resolve too.
+   const aliases=[...new Set([key,courseKey(id),courseKey(code),courseKey(name)].filter(Boolean))];
+   for(const alias of aliases){await setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true});}
+   // Verify the canonical record from Firestore, not merely the local form state.
+   const verify=await getDoc(doc(settingsColl,key));if(!verify.exists()||verify.data().published!==true||verify.data().type!=="Monthly Main Exam")throw new Error("Firestore ne settings save confirm nahi ki. Firebase Console ke Rules aur Main Admin login ko check karein.");
+   return {id:key,...verify.data()};
+ },
+ async getCourseExamSettings(identity){
+   const wanted=new Set(identityValues(identity).map(courseKey).filter(Boolean));if(!wanted.size)return null;
+   // First check every likely deterministic document key.
+   for(const value of identityValues(identity)){
+     const key=courseKey(value);if(!key)continue;
+     const snap=await getDoc(doc(settingsColl,key));
+     if(snap.exists()){
+       const d={id:snap.id,...snap.data()};
+       const values=[d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey);
+       if(d.published===true&&d.type==="Monthly Main Exam"&&values.some(v=>wanted.has(v)))return d;
+     }
+   }
+   // Compatibility fallback: older settings may be keyed by ID, code, or full display name.
+   const all=await getDocs(settingsColl);
+   const matches=all.docs.map(s=>({id:s.id,...s.data()})).filter(d=>{
+     if(d.published!==true||d.type!=="Monthly Main Exam")return false;
+     return [d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey).some(v=>wanted.has(v));
+   });
+   if(!matches.length)return null;
+   const exact=matches.find(d=>wanted.has(courseKey(d.courseCode)))||matches.find(d=>wanted.has(courseKey(d.courseId)))||matches[0];
+   return exact;
+ },
+ async setRequestStatus(id,status){
+   if(!isMainAdmin())throw new Error("Sirf Main Admin official login se approval de sakta hai.");
+   if(!["approved","denied"].includes(status))throw new Error("Invalid status");
+   await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+ },
+ async hasExamResult(studentUid,examId){
+   if(!studentUid||!examId)return false;
+   const q=query(collection(firestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
+   const snap=await getDocs(q);return !snap.empty;
+ },
+ async deleteExamResult(resultId){
+   if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
+   await deleteDoc(doc(firestore,"monthlyExamResults",String(resultId)));
+ },
+ async saveExamResult(result){
+   const user=auth.currentUser;
+   if(!user)throw new Error("Exam result save karne ke liye authenticated session nahi mila. Dobara login karke exam submit karein.");
+   const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
+   const payload={...result,id,studentUid:user.uid,submittedAt:serverTimestamp(),source:"web-exam"};
+   await setDoc(doc(firestore,"monthlyExamResults",id),payload);
+   return payload;
+ },
+ watchAdminRequests(callback){
+   if(!isMainAdmin()){callback([]);return ()=>{};}
+   return onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>{
+     console.error("Admin request feed:",e);callback([]);const feed=document.getElementById("cloudApprovalFeed");
+     if(feed)feed.innerHTML='<p class="error">Approval list load nahi hui: '+esc(friendlyAuthError(e))+'</p>';
+   });
+ }
+};
+window.BCSMExamCloud=api;
+let adminUnsub=null,latestRows=[];
+function renderRows(rows){const pending=rows.filter(r=>r.status==="pending");return `<p class="muted">Sirf Monthly Main Exam ki online pending approvals yahan dikhengi. Main Admin hi approve/deny kar sakta hai.</p><div class="tablewrap"><table><thead><tr><th>Student</th><th>Course / Semester</th><th>Batch</th><th>Requested</th><th>Action</th></tr></thead><tbody>${pending.map(r=>`<tr><td>${esc(r.studentName)}<br>${esc(r.studentPhone||"")}</td><td>${esc(r.courseName||r.courseId)} / ${esc(r.semester)}</td><td>${esc(r.batch)}</td><td>${esc(r.requestedAt||"")}</td><td><button class="small primary" onclick="approveExamRequest('${r.id}')">Approve</button> <button class="small danger" onclick="denyExamRequest('${r.id}')">Deny</button></td></tr>`).join("")||'<tr><td colspan="5">Koi pending Main Exam approval nahi hai.</td></tr>'}</tbody></table></div>`;}
+function renderApproval(){const mount=document.getElementById("cloudApprovalMount"),adminContent=document.getElementById("adminContent");if(!mount||!adminContent||!document.getElementById("eCourse"))return;let feed=mount.querySelector("#cloudApprovalFeed");if(!feed){mount.innerHTML='<div class="card" style="margin:18px 0"><h3>🔐 Pending Monthly Main Exam Approvals</h3><div id="cloudApprovalFeed"></div></div>';feed=mount.querySelector("#cloudApprovalFeed");}if(feed)feed.innerHTML=renderRows(latestRows);}
+function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse");if(!screenOpen){if(adminUnsub){adminUnsub();adminUnsub=null;}return;}renderApproval();if(adminUnsub)return;if(isMainAdmin()){adminUnsub=api.watchAdminRequests(rows=>{latestRows=rows;renderApproval();});}else{latestRows=[];renderApproval();const feed=document.getElementById("cloudApprovalFeed");if(feed&&window.__bcsmFirebaseRole!=="admin")feed.innerHTML='<p class="muted">Pending approvals dekhne ke liye official Main Admin account se login karein. Institute Admin ko approval access nahi hai.</p>';}}
+window.approveExamRequest=async id=>{try{await api.setRequestStatus(id,"approved");}catch(e){alert("Approval failed: "+(e.message||e));}};
+window.denyExamRequest=async id=>{try{await api.setRequestStatus(id,"denied");}catch(e){alert("Deny failed: "+(e.message||e));}};
+const observer=new MutationObserver(()=>{if(document.getElementById("eCourse")&&!document.getElementById("cloudApprovalFeed"))attachAdminFeed();else if(!document.getElementById("eCourse")&&adminUnsub){adminUnsub();adminUnsub=null;}});observer.observe(document.body,{childList:true,subtree:true});
+
+let resultUnsub=null;
+function attachResultFeed(){
+ if(resultUnsub){resultUnsub();resultUnsub=null;}
+ if(!isMainAdmin())return;
+ resultUnsub=onSnapshot(collection(firestore,"monthlyExamResults"),snap=>{
+   const cloud=snap.docs.map(d=>({id:d.id,...d.data()}));
+   window.dispatchEvent(new CustomEvent("bcsm-monthly-cloud-results",{detail:{results:cloud}}));
+ },e=>console.error("Monthly result feed failed",e));
+}
+
+onAuthStateChanged(auth,()=>{setTimeout(attachAdminFeed,200);setTimeout(attachResultFeed,300)});window.addEventListener("bcsm-firebase-ready",()=>setTimeout(attachAdminFeed,200));window.addEventListener("bcsm-firebase-auth-ready",()=>setTimeout(attachAdminFeed,250));
