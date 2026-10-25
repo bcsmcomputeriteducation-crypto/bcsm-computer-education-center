@@ -2,13 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    // Role accounts are created manually in Firebase Authentication only.
-    // Gmail plus-address aliases all deliver to the institute inbox.
     function roleIs(role) {
       return signedIn() && (
-        (role == 'admin' && request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com') ||
-        (role == 'instituteAdmin' && request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com') ||
-        (role == 'teacher' && request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com')
+        (role == 'admin' && (request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com' || request.auth.uid == 'bcsm-role-admin' || request.auth.token.role == 'admin')) ||
+        (role == 'instituteAdmin' && (request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com' || request.auth.uid == 'bcsm-role-institute-admin' || request.auth.token.role == 'instituteAdmin')) ||
+        (role == 'teacher' && (request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com' || request.auth.uid == 'bcsm-role-teacher' || request.auth.token.role == 'teacher'))
       );
     }
     function isAdmin() { return roleIs('admin'); }
@@ -23,10 +21,7 @@ service cloud.firestore {
       allow update: if (signedIn() && request.auth.uid == uid && request.resource.data.uid == uid && request.resource.data.role == 'student') || canManageInstitute() || roleIs('teacher');
       allow delete: if canManageInstitute();
     }
-    match /admins/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if false;
-    }
+    match /admins/{uid} { allow read: if signedIn() && request.auth.uid == uid; allow write: if false; }
     match /teachers/{id} { allow read: if canManageInstitute() || roleIs('teacher'); allow write: if canManageInstitute(); }
     match /courses/{id} { allow read: if true; allow write: if canManageInstitute(); }
     match /admissions/{id} { allow read, create, update: if canManageInstitute() || roleIs('teacher'); allow delete: if canManageInstitute(); }
@@ -37,7 +32,7 @@ service cloud.firestore {
     match /monthlyExamRequests/{requestId} {
       allow create: if signedIn()
         && request.resource.data.studentUid == request.auth.uid
-        && request.resource.data.status == "pending"
+        && request.resource.data.status == 'pending'
         && request.resource.data.studentName is string
         && request.resource.data.courseName is string
         && request.resource.data.courseId is string
@@ -47,15 +42,15 @@ service cloud.firestore {
         && request.resource.data.requestToken is string;
       allow read: if isAdmin() || (signedIn() && resource.data.studentUid == request.auth.uid);
       allow update: if isAdmin()
-        && request.resource.data.status in ["approved", "denied"]
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "approvedAt", "approvedBy"]);
+        && request.resource.data.status in ['approved', 'denied']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'approvedAt', 'approvedBy']);
       allow delete: if isAdmin();
     }
     match /monthlyExamSettings/{courseKey} {
       allow read: if signedIn();
       allow create, update: if isAdmin()
         && request.resource.data.courseKey == courseKey
-        && request.resource.data.type == "Monthly Main Exam"
+        && request.resource.data.type == 'Monthly Main Exam'
         && request.resource.data.published == true
         && request.resource.data.questionCount is number
         && request.resource.data.duration is number
