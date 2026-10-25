@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
 const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings");
@@ -82,6 +82,15 @@ const api={
    if(!isMainAdmin())throw new Error("Sirf Main Admin official login se approval de sakta hai.");
    if(!["approved","denied"].includes(status))throw new Error("Invalid status");
    await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+ },
+ async hasExamResult(studentUid,examId){
+   if(!studentUid||!examId)return false;
+   const q=query(collection(firestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
+   const snap=await getDocs(q);return !snap.empty;
+ },
+ async deleteExamResult(resultId){
+   if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
+   await deleteDoc(doc(firestore,"monthlyExamResults",String(resultId)));
  },
  async saveExamResult(result){
    const user=auth.currentUser;
