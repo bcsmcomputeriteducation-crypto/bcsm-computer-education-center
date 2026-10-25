@@ -4,9 +4,9 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function roleIs(role) {
       return signedIn() && (
-        (role == 'admin' && (request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com' || request.auth.uid == 'bcsm-role-admin' || request.auth.token.role == 'admin')) ||
-        (role == 'instituteAdmin' && (request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com' || request.auth.uid == 'bcsm-role-institute-admin' || request.auth.token.role == 'instituteAdmin')) ||
-        (role == 'teacher' && (request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com' || request.auth.uid == 'bcsm-role-teacher' || request.auth.token.role == 'teacher'))
+        (role == 'admin' && (request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com' || request.auth.token.role == 'admin')) ||
+        (role == 'instituteAdmin' && (request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com' || request.auth.token.role == 'instituteAdmin')) ||
+        (role == 'teacher' && (request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com' || request.auth.token.role == 'teacher'))
       );
     }
     function isAdmin() { return roleIs('admin'); }
