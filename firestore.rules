@@ -1,63 +1,45 @@
 rules_version = '2';
 service cloud.firestore {
-  match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function roleIs(role) {
-      return signedIn() && (
-        (role == 'admin' && (request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com' || request.auth.token.role == 'admin')) ||
-        (role == 'instituteAdmin' && (request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com' || request.auth.token.role == 'instituteAdmin')) ||
-        (role == 'teacher' && (request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com' || request.auth.token.role == 'teacher'))
-      );
-    }
-    function isAdmin() { return roleIs('admin'); }
-    function isInstituteAdmin() { return roleIs('instituteAdmin'); }
-    function canManageInstitute() { return isAdmin() || isInstituteAdmin(); }
-
-    match /roleCredentials/{role} { allow read, write: if false; }
-    match /rolePasswordResets/{token} { allow read, write: if false; }
-    match /students/{uid} {
-      allow create: if signedIn() && request.auth.uid == uid && request.resource.data.role == 'student';
-      allow read: if (signedIn() && request.auth.uid == uid) || canManageInstitute() || roleIs('teacher');
-      allow update: if (signedIn() && request.auth.uid == uid && request.resource.data.uid == uid && request.resource.data.role == 'student') || canManageInstitute() || roleIs('teacher');
-      allow delete: if canManageInstitute();
-    }
-    match /admins/{uid} { allow read: if signedIn() && request.auth.uid == uid; allow write: if false; }
-    match /teachers/{id} { allow read: if canManageInstitute() || roleIs('teacher'); allow write: if canManageInstitute(); }
-    match /courses/{id} { allow read: if true; allow write: if canManageInstitute(); }
-    match /admissions/{id} { allow read, create, update: if canManageInstitute() || roleIs('teacher'); allow delete: if canManageInstitute(); }
-    match /results/{id} {
-      allow read: if canManageInstitute() || roleIs('teacher') || (signedIn() && resource.data.studentUid == request.auth.uid);
-      allow create, update, delete: if canManageInstitute();
-    }
-    match /monthlyExamRequests/{requestId} {
-      allow create: if signedIn()
-        && request.resource.data.studentUid == request.auth.uid
-        && request.resource.data.status == 'pending'
-        && request.resource.data.studentName is string
-        && request.resource.data.courseName is string
-        && request.resource.data.courseId is string
-        && request.resource.data.courseKey is string
-        && request.resource.data.semester is string
-        && request.resource.data.batch is string
-        && request.resource.data.requestToken is string;
-      allow read: if isAdmin() || (signedIn() && resource.data.studentUid == request.auth.uid);
-      allow update: if isAdmin()
-        && request.resource.data.status in ['approved', 'denied']
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'approvedAt', 'approvedBy']);
-      allow delete: if isAdmin();
-    }
-    match /monthlyExamSettings/{courseKey} {
-      allow read: if signedIn();
-      allow create, update: if isAdmin()
-        && request.resource.data.courseKey == courseKey
-        && request.resource.data.type == 'Monthly Main Exam'
-        && request.resource.data.published == true
-        && request.resource.data.questionCount is number
-        && request.resource.data.duration is number
-        && request.resource.data.totalMarks is number
-        && request.resource.data.passMarks is number;
-      allow delete: if isAdmin();
-    }
-    match /{document=**} { allow read, write: if false; }
+ match /databases/{database}/documents {
+  function signedIn(){return request.auth != null;}
+  function roleIs(role){return signedIn() && ((request.auth.token.role == role) || (role == 'admin' && request.auth.token.email == 'bcsmcomputer.iteducation+admin@gmail.com') || (role == 'instituteAdmin' && request.auth.token.email == 'bcsmcomputer.iteducation+institute@gmail.com') || (role == 'teacher' && request.auth.token.email == 'bcsmcomputer.iteducation+teacher@gmail.com'));}
+  function isAdmin(){return roleIs('admin');}
+  function isInstituteAdmin(){return roleIs('instituteAdmin');}
+  function canManageInstitute(){return isAdmin() || isInstituteAdmin();}
+  match /appData/{docId}{allow read,write: if canManageInstitute();}
+  match /roleCredentials/{role}{allow read,write:if false;}
+  match /rolePasswordResets/{token}{allow read,write:if false;}
+  match /roleAuthRateLimits/{key}{allow read,write:if false;}
+  match /students/{uid}{
+   allow create: if signedIn() && request.auth.uid==uid && request.resource.data.role=='student';
+   allow read: if (signedIn()&&request.auth.uid==uid)||canManageInstitute()||roleIs('teacher');
+   allow update: if (signedIn()&&request.auth.uid==uid&&request.resource.data.uid==uid&&request.resource.data.role=='student')||canManageInstitute()||roleIs('teacher');
+   allow delete: if canManageInstitute();
   }
+  match /admins/{uid}{allow read:if signedIn()&&request.auth.uid==uid;allow write:if false;}
+  match /teachers/{id}{allow read:if canManageInstitute()||roleIs('teacher');allow write:if canManageInstitute();}
+  match /courses/{id}{allow read:true;allow write:if canManageInstitute();}
+  match /admissions/{id}{allow read,create,update:if canManageInstitute()||roleIs('teacher');allow delete:if canManageInstitute();}
+  match /results/{id}{allow read:if canManageInstitute()||roleIs('teacher')||(signedIn()&&resource.data.studentUid==request.auth.uid);allow create,update,delete:if canManageInstitute();}
+  match /monthlyExamRequests/{requestId}{
+   allow create:if signedIn()&&request.resource.data.studentUid==request.auth.uid&&request.resource.data.status=='pending'&&request.resource.data.studentName is string&&request.resource.data.courseName is string&&request.resource.data.courseId is string&&request.resource.data.courseKey is string&&request.resource.data.semester is string&&request.resource.data.batch is string&&request.resource.data.requestToken is string;
+   allow read:if isAdmin()||(signedIn()&&resource.data.studentUid==request.auth.uid);
+   allow update:if isAdmin()&&request.resource.data.status in ['approved','denied']&&request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','approvedAt','approvedBy']);
+   allow delete:if isAdmin();
+  }
+  match /monthlyExamSettings/{courseKey}{
+   allow read:if signedIn();
+   allow create,update:if isAdmin()&&request.resource.data.courseKey==courseKey&&request.resource.data.type=='Monthly Main Exam'&&request.resource.data.published==true&&request.resource.data.questionCount is number&&request.resource.data.duration is number&&request.resource.data.totalMarks is number&&request.resource.data.passMarks is number;
+   allow delete:if isAdmin();
+  }
+  match /monthlyExamResults/{resultId}{
+   allow create:if signedIn()&&request.resource.data.studentUid==request.auth.uid&&request.resource.data.id==resultId&&request.resource.data.score is number&&request.resource.data.maxScore is number&&request.resource.data.examId is string;
+   allow read:if isAdmin()||(signedIn()&&resource.data.studentUid==request.auth.uid);
+   allow update,delete:if isAdmin();
+  }
+  match /examQuestions/{id}{allow read:if signedIn();allow write:if isAdmin();}
+  match /monthlyExams/{id}{allow read:if signedIn();allow write:if isAdmin();}
+  match /examCloudConfig/{id}{allow read:if signedIn();allow write:if isAdmin();}
+  match /{document=**}{allow read,write:if false;}
+ }
 }
