@@ -4,10 +4,10 @@ import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, or
 import { firebaseConfig } from "./firebase-config.js";
 const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
 const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings");
-const MAIN_ADMIN_EMAIL="bcsmcomputer.iteducation+admin@gmail.com", MAIN_ADMIN_UID="bcsm-role-admin";
+const MAIN_ADMIN_EMAIL="bcsmcomputer.iteducation+admin@gmail.com";
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
-function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL||(window.__bcsmFirebaseRole==="admin"&&u.uid===MAIN_ADMIN_UID));}
+function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL);}
 function friendlyAuthError(e){
  if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
  if(e?.code==="permission-denied")return "Firestore ne request rok di. Firebase Console → Firestore Database → Rules mein ZIP ki firestore.rules publish karein; Rules publish hue bina cross-device approval kaam nahi karega.";
@@ -49,20 +49,34 @@ const api={
    const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks);
    if(!Number.isFinite(questionCount)||questionCount<1||!Number.isFinite(duration)||duration<1||!Number.isFinite(totalMarks)||totalMarks<1||!Number.isFinite(passMarks)||passMarks<0)throw new Error("Questions, duration aur marks ki settings check karein.");
    const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
-   await setDoc(doc(settingsColl,key),data,{merge:true});
-   // Read-after-write confirms settings really reached Firestore, not only local browser state.
-   const verify=await getDoc(doc(settingsColl,key));if(!verify.exists()||verify.data().published!==true)throw new Error("Settings Firestore mein save hone ki confirmation nahi mili. Firestore Rules check karein.");
+   // Write canonical code key and compatibility aliases so old requests using course ID/name resolve too.
+   const aliases=[...new Set([key,courseKey(id),courseKey(code),courseKey(name)].filter(Boolean))];
+   for(const alias of aliases){await setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true});}
+   // Verify the canonical record from Firestore, not merely the local form state.
+   const verify=await getDoc(doc(settingsColl,key));if(!verify.exists()||verify.data().published!==true||verify.data().type!=="Monthly Main Exam")throw new Error("Firestore ne settings save confirm nahi ki. Firebase Console ke Rules aur Main Admin login ko check karein.");
    return {id:key,...verify.data()};
  },
  async getCourseExamSettings(identity){
-   const wanted=identityValues(identity);if(!wanted.length)return null;
-   // Try normalized keys first (fast path), then scan accessible settings for legacy ID/code/name keys.
-   for(const value of wanted){const key=courseKey(value);if(!key)continue;try{const snap=await getDoc(doc(settingsColl,key));if(snap.exists()){const d={id:snap.id,...snap.data()};if(d.published===true&&d.type==="Monthly Main Exam"&&matchesIdentity(d,identity))return d;}}catch(e){if(e?.code==="permission-denied")throw e;}}
+   const wanted=new Set(identityValues(identity).map(courseKey).filter(Boolean));if(!wanted.size)return null;
+   // First check every likely deterministic document key.
+   for(const value of identityValues(identity)){
+     const key=courseKey(value);if(!key)continue;
+     const snap=await getDoc(doc(settingsColl,key));
+     if(snap.exists()){
+       const d={id:snap.id,...snap.data()};
+       const values=[d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey);
+       if(d.published===true&&d.type==="Monthly Main Exam"&&values.some(v=>wanted.has(v)))return d;
+     }
+   }
+   // Compatibility fallback: older settings may be keyed by ID, code, or full display name.
    const all=await getDocs(settingsColl);
-   const docs=all.docs.map(s=>({id:s.id,...s.data()})).filter(d=>d.published===true&&d.type==="Monthly Main Exam"&&matchesIdentity(d,identity));
-   if(!docs.length)return null;
-   const exactCode=courseKey(identity&&typeof identity==="object"?(identity.courseCode||""):identity);
-   return docs.find(d=>courseKey(d.courseCode)===exactCode)||docs[0];
+   const matches=all.docs.map(s=>({id:s.id,...s.data()})).filter(d=>{
+     if(d.published!==true||d.type!=="Monthly Main Exam")return false;
+     return [d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey).some(v=>wanted.has(v));
+   });
+   if(!matches.length)return null;
+   const exact=matches.find(d=>wanted.has(courseKey(d.courseCode)))||matches.find(d=>wanted.has(courseKey(d.courseId)))||matches[0];
+   return exact;
  },
  async setRequestStatus(id,status){
    if(!isMainAdmin())throw new Error("Sirf Main Admin official login se approval de sakta hai.");
