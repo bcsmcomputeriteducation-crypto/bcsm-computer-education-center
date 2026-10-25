@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
 const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings");
@@ -26,7 +26,7 @@ const api={
  async createRequest(p){
    const user=await ensureStudentSession(),key=courseKey(p.courseCode||p.courseName||p.courseId);
    if(!key)throw new Error("Course ki pehchan nahi mili. Course dobara select karein.");
-   const id=crypto.randomUUID();
+   const id=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==='function')?globalThis.crypto.randomUUID():('req-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12));
    const data={...p,courseKey:key,studentUid:user.uid,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};
    await setDoc(doc(firestore,"monthlyExamRequests",id),data);
    return {id,...data};
@@ -49,8 +49,18 @@ const api={
  async getCourseExamSettings(courseIdentity){
    const key=courseKey(courseIdentity);
    if(!key) return null;
-   const snap=await getDoc(doc(settingsColl,key));
-   return snap.exists()?{id:snap.id,...snap.data()}:null;
+   // Try canonical key first, then match older settings saved by course ID/code/name.
+   const direct=await getDoc(doc(settingsColl,key));
+   if(direct.exists() && direct.data().published===true) return {id:direct.id,...direct.data()};
+   const all=await getDocs(settingsColl);
+   const wanted=String(courseIdentity??'').trim().toLowerCase();
+   const found=all.docs.map(d=>({id:d.id,...d.data()})).find(x=>{
+     if(x.published!==true || x.type!=="Monthly Main Exam") return false;
+     const candidates=[x.courseId,x.courseCode,x.courseName,x.title,x.courseKey,x.id]
+       .filter(v=>v!==undefined && v!==null && String(v).trim()!=="");
+     return candidates.some(v=>String(v).trim().toLowerCase()===wanted || courseKey(v)===key);
+   });
+   return found||null;
  },
  async setRequestStatus(id,status){
    if(!isMainAdmin())throw new Error("Sirf Main Admin ke official Admin Login ko approval ka adhikar hai; Institute Admin nahi.");
