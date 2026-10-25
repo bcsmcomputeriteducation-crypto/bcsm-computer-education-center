@@ -7,7 +7,7 @@ const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(f
 const MAIN_ADMIN_EMAIL="bcsmcomputer.iteducation+admin@gmail.com";
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
-function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL)&&window.__bcsmFirebaseRole==="admin";}
+function isMainAdmin(){const u=auth.currentUser;return !!u&&String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL;}
 function friendlyAuthError(e){
  if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
  if(e?.code==="permission-denied")return "Firestore ne request rok di. Firebase Console → Firestore Database → Rules mein ZIP ki firestore.rules publish karein; Rules publish hue bina cross-device approval kaam nahi karega.";
@@ -81,7 +81,17 @@ const api={
  async setRequestStatus(id,status){
    if(!isMainAdmin())throw new Error("Sirf Main Admin official login se approval de sakta hai.");
    if(!["approved","denied"].includes(status))throw new Error("Invalid status");
-   await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+   const ref=doc(firestore,"monthlyExamRequests",String(id));
+   const current=await getDoc(ref);
+   if(!current.exists())throw new Error("Yeh request Cloud mein nahi mili. Student se nayi request bhejwayein.");
+   const old=current.data();
+   // Idempotent: once approved/denied, another admin device must not process it again.
+   if(old.status===status)return {id:current.id,...old};
+   if(old.status!=="pending")throw new Error("Is request ka status pehle hi "+String(old.status||"update")+" ho chuka hai. List refresh karein.");
+   await updateDoc(ref,{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+   const verified=await getDoc(ref);
+   if(!verified.exists()||verified.data().status!==status)throw new Error("Approval Cloud par confirm nahi hua. Rules aur internet check karein.");
+   return {id:verified.id,...verified.data()};
  },
  async hasExamResult(studentUid,examId){
    if(!studentUid||!examId)return false;
@@ -102,7 +112,7 @@ const api={
  },
  watchAdminRequests(callback){
    if(!isMainAdmin()){callback([]);return ()=>{};}
-   return onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>{
+   return onSnapshot(coll,snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(b.requestedAt||"").localeCompare(String(a.requestedAt||"")))),e=>{
      console.error("Admin request feed:",e);callback([]);const feed=document.getElementById("cloudApprovalFeed");
      if(feed)feed.innerHTML='<p class="error">Approval list load nahi hui: '+esc(friendlyAuthError(e))+'</p>';
    });
