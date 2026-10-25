@@ -7,7 +7,7 @@ const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(f
 const MAIN_ADMIN_EMAIL="bcsmcomputer.iteducation+admin@gmail.com";
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
-function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL);}
+function isMainAdmin(){const u=auth.currentUser;return !!u&&(String(u.email||"").toLowerCase()===MAIN_ADMIN_EMAIL)&&window.__bcsmFirebaseRole==="admin";}
 function friendlyAuthError(e){
  if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
  if(e?.code==="permission-denied")return "Firestore ne request rok di. Firebase Console → Firestore Database → Rules mein ZIP ki firestore.rules publish karein; Rules publish hue bina cross-device approval kaam nahi karega.";
@@ -83,6 +83,14 @@ const api={
    if(!["approved","denied"].includes(status))throw new Error("Invalid status");
    await updateDoc(doc(firestore,"monthlyExamRequests",id),{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
  },
+ async saveExamResult(result){
+   const user=auth.currentUser;
+   if(!user)throw new Error("Exam result save karne ke liye authenticated session nahi mila. Dobara login karke exam submit karein.");
+   const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
+   const payload={...result,id,studentUid:user.uid,submittedAt:serverTimestamp(),source:"web-exam"};
+   await setDoc(doc(firestore,"monthlyExamResults",id),payload);
+   return payload;
+ },
  watchAdminRequests(callback){
    if(!isMainAdmin()){callback([]);return ()=>{};}
    return onSnapshot(query(coll,orderBy("requestedAt","desc")),snap=>callback(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>{
@@ -99,4 +107,15 @@ function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse")
 window.approveExamRequest=async id=>{try{await api.setRequestStatus(id,"approved");}catch(e){alert("Approval failed: "+(e.message||e));}};
 window.denyExamRequest=async id=>{try{await api.setRequestStatus(id,"denied");}catch(e){alert("Deny failed: "+(e.message||e));}};
 const observer=new MutationObserver(()=>{if(document.getElementById("eCourse")&&!document.getElementById("cloudApprovalFeed"))attachAdminFeed();else if(!document.getElementById("eCourse")&&adminUnsub){adminUnsub();adminUnsub=null;}});observer.observe(document.body,{childList:true,subtree:true});
-onAuthStateChanged(auth,()=>setTimeout(attachAdminFeed,200));window.addEventListener("bcsm-firebase-ready",()=>setTimeout(attachAdminFeed,200));window.addEventListener("bcsm-firebase-auth-ready",()=>setTimeout(attachAdminFeed,250));
+
+let resultUnsub=null;
+function attachResultFeed(){
+ if(resultUnsub){resultUnsub();resultUnsub=null;}
+ if(!isMainAdmin())return;
+ resultUnsub=onSnapshot(collection(firestore,"monthlyExamResults"),snap=>{
+   const cloud=snap.docs.map(d=>({id:d.id,...d.data()}));
+   window.dispatchEvent(new CustomEvent("bcsm-monthly-cloud-results",{detail:{results:cloud}}));
+ },e=>console.error("Monthly result feed failed",e));
+}
+
+onAuthStateChanged(auth,()=>{setTimeout(attachAdminFeed,200);setTimeout(attachResultFeed,300)});window.addEventListener("bcsm-firebase-ready",()=>setTimeout(attachAdminFeed,200));window.addEventListener("bcsm-firebase-auth-ready",()=>setTimeout(attachAdminFeed,250));
