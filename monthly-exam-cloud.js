@@ -9,7 +9,7 @@ const coll=collection(firestore,"monthlyExamRequests"),studentRequests=collectio
 const ADMIN_EMAILS=["bcsmcomputer.iteducation+admin@gmail.com","bcsmcomputer.iteducation+institute@gmail.com"];
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
-function isMainAdmin(){const u=auth.currentUser;return !!u&&ADMIN_EMAILS.includes(String(u.email||"").toLowerCase());}
+function isMainAdmin(){const u=auth.currentUser;return !!u&&(ADMIN_EMAILS.includes(String(u.email||"").toLowerCase())||["n9XlY6yAR7b7vkVjiXkvOXv50O33","YCtq6PUlGKN7hnojQexb8Y3j1qE2"].includes(String(u.uid||"")));}
 function friendlyAuthError(e){
  if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
  if(e?.code==="permission-denied")return "Firestore ne request rok di. Firebase Console → Firestore Database → Rules mein ZIP ki firestore.rules publish karein; Rules publish hue bina cross-device approval kaam nahi karega.";
