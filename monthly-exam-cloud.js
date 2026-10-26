@@ -107,15 +107,17 @@ const api={
    if(!studentUid||!examId)return false;
    await ensureStudentSession();
    const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
-   const snap=await getDocs(q);return !snap.empty;
+   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.deleted!==true);
  },
  async deleteExamResult(resultId){
    if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
    const id=String(resultId);
-   // Tombstone stops legacy/local sync from recreating an intentionally deleted result.
-   await deleteDoc(doc(firestore,"monthlyExamResults",id));
-   const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");
-   if(!deleted.includes(id)){deleted.push(id);localStorage.setItem("bcsmDeletedMonthlyResults_v1",JSON.stringify(deleted.slice(-5000)));}
+   // Durable tombstone prevents result resurrection after refresh and on other admin browsers.
+    const resultRef=doc(firestore,"monthlyExamResults",id);const existing=await getDoc(resultRef);
+    if(existing.exists())await setDoc(resultRef,{...existing.data(),id,deleted:true,deletedAt:new Date().toISOString(),deletedBy:auth.currentUser?.email||auth.currentUser?.uid||"admin"});
+    const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");if(!deleted.includes(id)){deleted.push(id);localStorage.setItem("bcsmDeletedMonthlyResults_v1",JSON.stringify(deleted.slice(-5000)));}
+    const hex=Array.from(id).map(ch=>ch.codePointAt(0).toString(16)).join("_");try{await deleteDoc(doc(firestore,"appData",("record_results_"+(hex||"empty")).slice(0,1400)));}catch(e){console.warn("Result appData mirror cleanup:",e);}
+    window.dispatchEvent(new CustomEvent("bcsm-monthly-result-deleted",{detail:{id}}));
  },
  async saveExamResult(result){
    const user=await ensureStudentSession();
@@ -171,9 +173,10 @@ function attachResultFeed(){
  if(resultUnsub){resultUnsub();resultUnsub=null;}
  if(!isMainAdmin())return;
  resultUnsub=onSnapshot(collection(firestore,"monthlyExamResults"),snap=>{
-   const cloud=snap.docs.map(d=>({id:d.id,...d.data()}));
-   window.dispatchEvent(new CustomEvent("bcsm-monthly-cloud-results",{detail:{results:cloud}}));
- },e=>console.error("Monthly result feed failed",e));
+   const cloud=snap.docs.map(d=>({id:d.id,...d.data()}));const deleted=cloud.filter(r=>r.deleted===true).map(r=>String(r.id));
+   if(deleted.length){const old=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");localStorage.setItem("bcsmDeletedMonthlyResults_v1",JSON.stringify([...new Set([...old,...deleted])].slice(-5000)));}
+   window.dispatchEvent(new CustomEvent("bcsm-monthly-cloud-results",{detail:{results:cloud.filter(r=>r.deleted!==true),deletedIds:deleted}}));
+  },e=>console.error("Monthly result feed failed",e));
 }
 
 onAuthStateChanged(auth,()=>{
