@@ -27,12 +27,15 @@ function identityValues(identity){
  ]:[identity];
  return [...new Set(raw.filter(v=>v!==undefined&&v!==null&&String(v).trim()).flatMap(v=>[String(v).trim(),courseKey(v)]).filter(Boolean))];
 }
+async function hashExamPassword(password){const bytes=new TextEncoder().encode(String(password));const digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("");}
 function matchesIdentity(settings,identity){
  const wanted=new Set(identityValues(identity).map(courseKey));
  const values=[settings.courseKey,settings.courseId,settings.courseCode,settings.courseName,settings.id];
  return values.some(v=>v!==undefined&&v!==null&&wanted.has(courseKey(v)));
 }
 const api={
+ async ensurePasswordExamSession(){return await ensureStudentSession();},
+ async verifyExamPassword(identity,password){const settings=await api.getCourseExamSettings(identity);if(!settings||!settings.examPasswordHash)return false;return (await hashExamPassword(password))===String(settings.examPasswordHash);},
  async createRequest(p){
    const user=await ensureStudentSession(),key=courseKey(p.courseCode||p.courseName||p.courseId);
    if(!key)throw new Error("Course ki pehchan nahi mili. Course dobara select karein.");
@@ -48,9 +51,10 @@ const api={
    if(!isMainAdmin())throw new Error("Main Admin Firebase login verify nahi hua. Official Main Admin account se dobara login karein.");
    const code=String(x.courseCode||x.code||"").trim(),name=String(x.courseName||x.name||"").trim(),id=String(x.courseId||"").trim();
    const key=courseKey(code||name||id);if(!key)throw new Error("Course code/ID nahi mila. Course select karke dobara save karein.");
-   const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks);
+   const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks),examPassword=String(x.examPassword||"").trim();
    if(!Number.isFinite(questionCount)||questionCount<1||!Number.isFinite(duration)||duration<1||!Number.isFinite(totalMarks)||totalMarks<1||!Number.isFinite(passMarks)||passMarks<0)throw new Error("Questions, duration aur marks ki settings check karein.");
-   const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
+   if(examPassword.length<4||examPassword.length>64)throw new Error("Monthly Main Exam password 4 se 64 characters ka hona chahiye.");
+   const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),examPasswordHash:await hashExamPassword(examPassword),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
    // Write canonical code key and compatibility aliases so old requests using course ID/name resolve too.
    const aliases=[...new Set([key,courseKey(id),courseKey(code),courseKey(name)].filter(Boolean))];
    for(const alias of aliases){await setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true});}
@@ -157,10 +161,11 @@ window.BCSMExamCloud=api;
 let adminUnsub=null,latestRows=[];
 function renderRows(rows){const pending=rows.filter(r=>r.status==="pending");return `<p class="muted">Sirf Monthly Main Exam ki online pending approvals yahan dikhengi. Main Admin hi approve/deny kar sakta hai.</p><div class="tablewrap"><table><thead><tr><th>Student</th><th>Course / Semester</th><th>Batch</th><th>Requested</th><th>Action</th></tr></thead><tbody>${pending.map(r=>`<tr><td>${esc(r.studentName)}<br>${esc(r.studentPhone||"")}</td><td>${esc(r.courseName||r.courseId)} / ${esc(r.semester)}</td><td>${esc(r.batch)}</td><td>${esc(r.requestedAt||"")}</td><td><button class="small primary" onclick="approveExamRequest('${r.id}')">Approve</button> <button class="small danger" onclick="denyExamRequest('${r.id}')">Deny</button></td></tr>`).join("")||'<tr><td colspan="5">Koi pending Main Exam approval nahi hai.</td></tr>'}</tbody></table></div>`;}
 function renderApproval(){const mount=document.getElementById("cloudApprovalMount"),adminContent=document.getElementById("adminContent");if(!mount||!adminContent||!document.getElementById("eCourse"))return;let feed=mount.querySelector("#cloudApprovalFeed");if(!feed){mount.innerHTML='<div class="card" style="margin:18px 0"><h3>🔐 Pending Monthly Main Exam Approvals</h3><div id="cloudApprovalFeed"></div></div>';feed=mount.querySelector("#cloudApprovalFeed");}if(feed)feed.innerHTML=renderRows(latestRows);}
-function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse");if(!screenOpen){if(adminUnsub){adminUnsub();adminUnsub=null;}return;}renderApproval();if(adminUnsub)return;if(isMainAdmin()){adminUnsub=api.watchAdminRequests(rows=>{latestRows=rows;renderApproval();});}else{latestRows=[];renderApproval();const feed=document.getElementById("cloudApprovalFeed");if(feed&&window.__bcsmFirebaseRole!=="admin")feed.innerHTML='<p class="muted">Pending approvals dekhne ke liye official Main Admin account se login karein. Institute Admin ko approval access nahi hai.</p>';}}
+function attachAdminFeed(){if(adminUnsub){adminUnsub();adminUnsub=null;}latestRows=[];}
+
 window.approveExamRequest=async id=>{try{await api.setRequestStatus(id,"approved");}catch(e){alert("Approval failed: "+(e.message||e));}};
 window.denyExamRequest=async id=>{try{await api.setRequestStatus(id,"denied");}catch(e){alert("Deny failed: "+(e.message||e));}};
-const observer=new MutationObserver(()=>{if(document.getElementById("eCourse")&&!document.getElementById("cloudApprovalFeed"))attachAdminFeed();else if(!document.getElementById("eCourse")&&adminUnsub){adminUnsub();adminUnsub=null;}});observer.observe(document.body,{childList:true,subtree:true});
+// Approval request listener intentionally removed: Monthly Main Exam uses the shared password setting.
 
 let resultUnsub=null;
 function attachResultFeed(){
