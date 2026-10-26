@@ -1,9 +1,11 @@
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDoc, getDocs, runTransaction } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-const app=getApps().length?getApps()[0]:initializeApp(firebaseConfig),auth=getAuth(app),firestore=getFirestore(app);
-const coll=collection(firestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings");
+const app=getApps().find(a=>a.name==="[DEFAULT]")||(getApps().length?getApps()[0]:initializeApp(firebaseConfig)),auth=getAuth(app),firestore=getFirestore(app);
+/* Keep student anonymous sessions separate from Admin email/password sessions. This prevents Start Exam from signing out an Admin or using the Admin UID as a student UID. */
+const studentApp=getApps().find(a=>a.name==="bcsmStudentRequests")||initializeApp(firebaseConfig,"bcsmStudentRequests"),studentAuth=getAuth(studentApp),studentFirestore=getFirestore(studentApp);
+const coll=collection(firestore,"monthlyExamRequests"),studentRequests=collection(studentFirestore,"monthlyExamRequests"),settingsColl=collection(firestore,"monthlyExamSettings"),studentSettings=collection(studentFirestore,"monthlyExamSettings");
 const ADMIN_EMAILS=["bcsmcomputer.iteducation+admin@gmail.com","bcsmcomputer.iteducation+institute@gmail.com"];
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
@@ -15,8 +17,8 @@ function friendlyAuthError(e){
  return e?.message||String(e);
 }
 async function ensureStudentSession(){
- if(auth.currentUser){if(isMainAdmin())await signOut(auth);else return auth.currentUser;}
- try{return (await signInAnonymously(auth)).user;}catch(e){throw new Error(friendlyAuthError(e));}
+ if(studentAuth.currentUser)return studentAuth.currentUser;
+ try{return (await signInAnonymously(studentAuth)).user;}catch(e){throw new Error(friendlyAuthError(e));}
 }
 function identityValues(identity){
  const raw=identity&&typeof identity==="object"?[
@@ -32,22 +34,18 @@ function matchesIdentity(settings,identity){
 }
 const api={
  async createRequest(p){
-   const user=await Promise.race([ensureStudentSession(),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Firebase login 15 second mein complete nahi hua. Authentication mein Anonymous sign-in enable karein aur internet check karein.")),15000))]);
-   const key=courseKey(p.courseCode||p.courseName||p.courseId);
+   const user=await ensureStudentSession(),key=courseKey(p.courseCode||p.courseName||p.courseId);
    if(!key)throw new Error("Course ki pehchan nahi mili. Course dobara select karein.");
    const id=(globalThis.crypto&&typeof globalThis.crypto.randomUUID==="function")?globalThis.crypto.randomUUID():"req-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,12);
    const data={...p,courseKey:key,studentUid:user.uid,status:"pending",requestToken:id,requestedAt:new Date().toISOString(),createdAt:serverTimestamp()};
-   try{
-     await Promise.race([setDoc(doc(firestore,"monthlyExamRequests",id),data),new Promise((_,reject)=>setTimeout(()=>reject(new Error("Firebase request 15 second mein save nahi hui. Firestore Rules publish karein, Anonymous sign-in enable karein, aur Console error check karein.")),15000))]);
-   }catch(e){throw new Error(friendlyAuthError(e));}
-   return {id,...data};
+   await setDoc(doc(studentFirestore,"monthlyExamRequests",id),data);return {id,...data};
  },
- watchRequest(id,callback){return onSnapshot(doc(firestore,"monthlyExamRequests",id),s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>{
+ watchRequest(id,callback){return onSnapshot(doc(studentFirestore,"monthlyExamRequests",id),s=>callback(s.exists()?{id:s.id,...s.data()}:null),e=>{
    console.error("Exam request listener:",e);const status=document.getElementById("meRequestStatus");
    if(status)status.innerHTML='<div class="error">Approval status load nahi hua: '+esc(friendlyAuthError(e))+'</div>';
  });},
  async saveCourseExamSettings(x){
-   if(!isMainAdmin())throw new Error("Admin Firebase login verify nahi hua. Official Admin ya Institute Admin account se dobara login karein.");
+   if(!isMainAdmin())throw new Error("Main Admin Firebase login verify nahi hua. Official Main Admin account se dobara login karein.");
    const code=String(x.courseCode||x.code||"").trim(),name=String(x.courseName||x.name||"").trim(),id=String(x.courseId||"").trim();
    const key=courseKey(code||name||id);if(!key)throw new Error("Course code/ID nahi mila. Course select karke dobara save karein.");
    const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks);
@@ -65,7 +63,7 @@ const api={
    // First check every likely deterministic document key.
    for(const value of identityValues(identity)){
      const key=courseKey(value);if(!key)continue;
-     const snap=await getDoc(doc(settingsColl,key));
+     const snap=await getDoc(doc(studentSettings,key));
      if(snap.exists()){
        const d={id:snap.id,...snap.data()};
        const values=[d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey);
@@ -73,7 +71,7 @@ const api={
      }
    }
    // Compatibility fallback: older settings may be keyed by ID, code, or full display name.
-   const all=await getDocs(settingsColl);
+   const all=await getDocs(studentSettings);
    const matches=all.docs.map(s=>({id:s.id,...s.data()})).filter(d=>{
      if(d.published!==true||d.type!=="Monthly Main Exam")return false;
      return [d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey).some(v=>wanted.has(v));
@@ -83,20 +81,18 @@ const api={
    return exact;
  },
  async setRequestStatus(id,status){
-   if(!isMainAdmin())throw new Error("Sirf official Admin ya Institute Admin login se approval/deny ho sakta hai.");
+   if(!isMainAdmin())throw new Error("Sirf Main Admin official login se approval de sakta hai.");
    if(!["approved","denied"].includes(status))throw new Error("Invalid status");
    const ref=doc(firestore,"monthlyExamRequests",String(id));
-   const result=await runTransaction(firestore,async tx=>{
-     const current=await tx.get(ref);
-     if(!current.exists())throw new Error("Yeh request Cloud mein nahi mili. Student se nayi request bhejwayein.");
-     const old=current.data();
-     if(old.status===status)return {id:current.id,...old};
-     if(old.status!=="pending")throw new Error("Is request ka status pehle hi "+String(old.status||"update")+" ho chuka hai. List refresh karein.");
-     const update={status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid};
-     tx.update(ref,update);return {id:current.id,...old,...update};
-   });
+   const current=await getDoc(ref);
+   if(!current.exists())throw new Error("Yeh request Cloud mein nahi mili. Student se nayi request bhejwayein.");
+   const old=current.data();
+   // Idempotent: once approved/denied, another admin device must not process it again.
+   if(old.status===status)return {id:current.id,...old};
+   if(old.status!=="pending")throw new Error("Is request ka status pehle hi "+String(old.status||"update")+" ho chuka hai. List refresh karein.");
+   await updateDoc(ref,{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
    const verified=await getDoc(ref);
-   if(!verified.exists()||verified.data().status!==status)throw new Error("Firestore mein status verify nahi hua. Firestore Rules publish aur sahi Firebase project check karein.");
+   if(!verified.exists()||verified.data().status!==status)throw new Error("Approval Cloud par confirm nahi hua. Rules aur internet check karein.");
    return {id:verified.id,...verified.data()};
  },
  async getExamQuestions(courseId,semester){
@@ -104,7 +100,7 @@ const api={
    const wantedCourse=String(courseId||"");
    const wantedSemester=String(semester||"").normalize("NFKC").trim().toLowerCase();
    if(!wantedCourse||!wantedSemester)return [];
-   const snap=await getDocs(collection(firestore,"examQuestions"));
+   const snap=await getDocs(collection(studentFirestore,"examQuestions"));
    const rows=snap.docs.map(d=>{const data=d.data()||{};return data.value&&typeof data.value==="object"?{...data.value,id:data.value.id||d.id}:{...data,id:data.id||d.id};}).filter(q=>String(q.courseId||q.courseID||q.course||"")===wantedCourse&&String(q.semester||q.semesterName||"").normalize("NFKC").trim().toLowerCase()===wantedSemester&&q.autoGenerated!==true);
    const pick=(...xs)=>xs.map(v=>String(v??"").trim()).find(Boolean)||"";
    const seen=new Set();
@@ -112,7 +108,8 @@ const api={
  },
  async hasExamResult(studentUid,examId){
    if(!studentUid||!examId)return false;
-   const q=query(collection(firestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
+   await ensureStudentSession();
+   const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
    const snap=await getDocs(q);return !snap.empty;
  },
  async deleteExamResult(resultId){
@@ -120,11 +117,11 @@ const api={
    await deleteDoc(doc(firestore,"monthlyExamResults",String(resultId)));
  },
  async saveExamResult(result){
-   const user=auth.currentUser;
-   if(!user)throw new Error("Exam result save karne ke liye authenticated session nahi mila. Dobara login karke exam submit karein.");
+   const user=await ensureStudentSession();
+   if(!user)throw new Error("Student Firebase session nahi mila. Dobara request karke exam submit karein.");
    const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
    const payload={...result,id,studentUid:user.uid,submittedAt:serverTimestamp(),source:"web-exam"};
-   await setDoc(doc(firestore,"monthlyExamResults",id),payload);
+   await setDoc(doc(studentFirestore,"monthlyExamResults",id),payload);
    return payload;
  },
  watchAdminRequests(callback){
@@ -137,9 +134,9 @@ const api={
 };
 window.BCSMExamCloud=api;
 let adminUnsub=null,latestRows=[];
-function renderRows(rows){const pending=rows.filter(r=>r.status==="pending");return `<p class="muted">Sirf Monthly Main Exam ki online pending approvals yahan dikhengi. Admin ya Institute Admin approve/deny kar sakta hai.</p><div class="tablewrap"><table><thead><tr><th>Student</th><th>Course / Semester</th><th>Batch</th><th>Requested</th><th>Action</th></tr></thead><tbody>${pending.map(r=>`<tr><td>${esc(r.studentName)}<br>${esc(r.studentPhone||"")}</td><td>${esc(r.courseName||r.courseId)} / ${esc(r.semester)}</td><td>${esc(r.batch)}</td><td>${esc(r.requestedAt||"")}</td><td><button class="small primary" onclick="approveExamRequest('${r.id}')">Approve</button> <button class="small danger" onclick="denyExamRequest('${r.id}')">Deny</button></td></tr>`).join("")||'<tr><td colspan="5">Koi pending Main Exam approval nahi hai.</td></tr>'}</tbody></table></div>`;}
+function renderRows(rows){const pending=rows.filter(r=>r.status==="pending");return `<p class="muted">Sirf Monthly Main Exam ki online pending approvals yahan dikhengi. Main Admin hi approve/deny kar sakta hai.</p><div class="tablewrap"><table><thead><tr><th>Student</th><th>Course / Semester</th><th>Batch</th><th>Requested</th><th>Action</th></tr></thead><tbody>${pending.map(r=>`<tr><td>${esc(r.studentName)}<br>${esc(r.studentPhone||"")}</td><td>${esc(r.courseName||r.courseId)} / ${esc(r.semester)}</td><td>${esc(r.batch)}</td><td>${esc(r.requestedAt||"")}</td><td><button class="small primary" onclick="approveExamRequest('${r.id}')">Approve</button> <button class="small danger" onclick="denyExamRequest('${r.id}')">Deny</button></td></tr>`).join("")||'<tr><td colspan="5">Koi pending Main Exam approval nahi hai.</td></tr>'}</tbody></table></div>`;}
 function renderApproval(){const mount=document.getElementById("cloudApprovalMount"),adminContent=document.getElementById("adminContent");if(!mount||!adminContent||!document.getElementById("eCourse"))return;let feed=mount.querySelector("#cloudApprovalFeed");if(!feed){mount.innerHTML='<div class="card" style="margin:18px 0"><h3>🔐 Pending Monthly Main Exam Approvals</h3><div id="cloudApprovalFeed"></div></div>';feed=mount.querySelector("#cloudApprovalFeed");}if(feed)feed.innerHTML=renderRows(latestRows);}
-function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse");if(!screenOpen){if(adminUnsub){adminUnsub();adminUnsub=null;}return;}renderApproval();if(adminUnsub)return;if(isMainAdmin()){adminUnsub=api.watchAdminRequests(rows=>{latestRows=rows;renderApproval();});}else{latestRows=[];renderApproval();const feed=document.getElementById("cloudApprovalFeed");if(feed&&window.__bcsmFirebaseRole!=="admin")feed.innerHTML='<p class="muted">Pending approvals dekhne ke liye official Admin ya Institute Admin account se login karein.</p>';}}
+function attachAdminFeed(){const screenOpen=!!document.getElementById("eCourse");if(!screenOpen){if(adminUnsub){adminUnsub();adminUnsub=null;}return;}renderApproval();if(adminUnsub)return;if(isMainAdmin()){adminUnsub=api.watchAdminRequests(rows=>{latestRows=rows;renderApproval();});}else{latestRows=[];renderApproval();const feed=document.getElementById("cloudApprovalFeed");if(feed&&window.__bcsmFirebaseRole!=="admin")feed.innerHTML='<p class="muted">Pending approvals dekhne ke liye official Main Admin account se login karein. Institute Admin ko approval access nahi hai.</p>';}}
 window.approveExamRequest=async id=>{try{await api.setRequestStatus(id,"approved");}catch(e){alert("Approval failed: "+(e.message||e));}};
 window.denyExamRequest=async id=>{try{await api.setRequestStatus(id,"denied");}catch(e){alert("Deny failed: "+(e.message||e));}};
 const observer=new MutationObserver(()=>{if(document.getElementById("eCourse")&&!document.getElementById("cloudApprovalFeed"))attachAdminFeed();else if(!document.getElementById("eCourse")&&adminUnsub){adminUnsub();adminUnsub=null;}});observer.observe(document.body,{childList:true,subtree:true});
