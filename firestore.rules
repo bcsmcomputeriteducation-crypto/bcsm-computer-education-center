@@ -11,8 +11,8 @@ service cloud.firestore {
         (role == 'teacher' && emailIs('bcsmcomputer.iteducation+teacher@gmail.com'))
       );
     }
-    function isAdmin() { return roleIs('admin'); }
-    function canManageInstitute() { return isAdmin() || roleIs('instituteAdmin'); }
+    function isAdmin() { return roleIs('admin') || (signedIn() && request.auth.uid == 'n9XlY6yAR7b7vkVjiXkvOXv50O33'); }
+    function canManageInstitute() { return isAdmin() || roleIs('instituteAdmin') || (signedIn() && request.auth.uid == 'YCtq6PUlGKN7hnojQexb8Y3j1qE2'); }
 
     match /appData/{docId} { allow read, write: if canManageInstitute(); }
     match /roleCredentials/{id} { allow read, write: if false; }
