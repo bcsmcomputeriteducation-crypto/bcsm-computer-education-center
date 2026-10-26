@@ -48,18 +48,32 @@ const api={
    if(status)status.innerHTML='<div class="error">Approval status load nahi hua: '+esc(friendlyAuthError(e))+'</div>';
  });},
  async saveCourseExamSettings(x){
-   if(!isMainAdmin())throw new Error("Main Admin Firebase login verify nahi hua. Official Main Admin account se dobara login karein.");
+   // Firebase restores persisted auth asynchronously. Wait briefly before checking Admin,
+   // otherwise a valid Admin session can be mistaken for a signed-out user.
+   if(!auth.currentUser){
+     await new Promise((resolve,reject)=>{
+       let finished=false;
+       const timer=setTimeout(()=>{if(!finished){finished=true;unsub();reject(new Error("Firebase Admin login load nahi hua. Admin se logout karke dobara login karein, phir Save karein."));}},8000);
+       const unsub=onAuthStateChanged(auth,user=>{
+         if(user&&!finished){finished=true;clearTimeout(timer);unsub();resolve();}
+       },err=>{if(!finished){finished=true;clearTimeout(timer);unsub();reject(err);}});
+     });
+   }
+   if(!isMainAdmin())throw new Error("Admin login mila, lekin yeh account Monthly Exam Settings save karne ke liye authorized nahi hai. Sahi Main Admin account se login karein.");
    const code=String(x.courseCode||x.code||"").trim(),name=String(x.courseName||x.name||"").trim(),id=String(x.courseId||"").trim();
    const key=courseKey(code||name||id);if(!key)throw new Error("Course code/ID nahi mila. Course select karke dobara save karein.");
    const questionCount=Number(x.questionCount),duration=Number(x.duration),totalMarks=Number(x.totalMarks),passMarks=Number(x.passMarks),examPassword=String(x.examPassword||"").trim();
    if(!Number.isFinite(questionCount)||questionCount<1||!Number.isFinite(duration)||duration<1||!Number.isFinite(totalMarks)||totalMarks<1||!Number.isFinite(passMarks)||passMarks<0)throw new Error("Questions, duration aur marks ki settings check karein.");
    if(examPassword.length<4||examPassword.length>64)throw new Error("Monthly Main Exam password 4 se 64 characters ka hona chahiye.");
    const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),examPasswordHash:await hashExamPassword(examPassword),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
-   // Write canonical code key and compatibility aliases so old requests using course ID/name resolve too.
-   const aliases=[...new Set([key,courseKey(id),courseKey(code),courseKey(name)].filter(Boolean))];
-   await Promise.all(aliases.map(alias=>setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true})));
-   // Verify the canonical record from Firestore, not merely the local form state.
-   const verify=await getDoc(doc(settingsColl,key));if(!verify.exists()||verify.data().published!==true||verify.data().type!=="Monthly Main Exam")throw new Error("Firestore ne settings save confirm nahi ki. Firebase Console ke Rules aur Main Admin login ko check karein.");
+   // Save the canonical course-code record first. Compatibility aliases are secondary:
+   // a failed alias must not make a successfully saved canonical record look like failure.
+   await setDoc(doc(settingsColl,key),{...data,courseKey:key},{merge:true});
+   const verify=await getDoc(doc(settingsColl,key));
+   if(!verify.exists()||verify.data().published!==true||verify.data().type!=="Monthly Main Exam")throw new Error("Firestore ne canonical settings save confirm nahi ki. Firestore Rules ya Admin permission check karein.");
+   const aliases=[...new Set([courseKey(id),courseKey(code),courseKey(name)].filter(a=>a&&a!==key))];
+   const aliasResults=await Promise.allSettled(aliases.map(alias=>setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true})));
+   aliasResults.forEach((result,index)=>{if(result.status==="rejected")console.warn("Compatibility alias save failed:",aliases[index],result.reason);});
    return {id:key,...verify.data()};
  },
  async getCourseExamSettings(identity){
