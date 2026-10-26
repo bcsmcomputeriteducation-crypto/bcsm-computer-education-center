@@ -57,22 +57,22 @@ const api={
    const data={courseKey:key,courseId:id,courseCode:code,courseName:name,title:String(x.title||"Monthly Main Exam"),type:"Monthly Main Exam",questionCount,duration,totalMarks,passMarks,passPercent:Number.isFinite(Number(x.passPercent))?Number(x.passPercent):Math.round(passMarks/totalMarks*100),examPasswordHash:await hashExamPassword(examPassword),published:true,updatedBy:auth.currentUser.email||auth.currentUser.uid,updatedAt:serverTimestamp()};
    // Write canonical code key and compatibility aliases so old requests using course ID/name resolve too.
    const aliases=[...new Set([key,courseKey(id),courseKey(code),courseKey(name)].filter(Boolean))];
-   for(const alias of aliases){await setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true});}
+   await Promise.all(aliases.map(alias=>setDoc(doc(settingsColl,alias),{...data,courseKey:alias},{merge:true})));
    // Verify the canonical record from Firestore, not merely the local form state.
    const verify=await getDoc(doc(settingsColl,key));if(!verify.exists()||verify.data().published!==true||verify.data().type!=="Monthly Main Exam")throw new Error("Firestore ne settings save confirm nahi ki. Firebase Console ke Rules aur Main Admin login ko check karein.");
    return {id:key,...verify.data()};
  },
  async getCourseExamSettings(identity){
    const wanted=new Set(identityValues(identity).map(courseKey).filter(Boolean));if(!wanted.size)return null;
-   // First check every likely deterministic document key.
-   for(const value of identityValues(identity)){
-     const key=courseKey(value);if(!key)continue;
-     const snap=await getDoc(doc(studentSettings,key));
-     if(snap.exists()){
-       const d={id:snap.id,...snap.data()};
-       const values=[d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey);
-       if(d.published===true&&d.type==="Monthly Main Exam"&&values.some(v=>wanted.has(v)))return d;
-     }
+   // Check deterministic course-key candidates concurrently. Serial reads could stall
+   // the student start flow on slow connections even when the saved setting exists.
+   const candidateKeys=[...new Set(identityValues(identity).map(courseKey).filter(Boolean))];
+   const candidateSnaps=await Promise.all(candidateKeys.map(key=>getDoc(doc(studentSettings,key))));
+   for(const snap of candidateSnaps){
+     if(!snap.exists())continue;
+     const d={id:snap.id,...snap.data()};
+     const values=[d.courseKey,d.courseId,d.courseCode,d.courseName,d.id].map(courseKey);
+     if(d.published===true&&d.type==="Monthly Main Exam"&&values.some(v=>wanted.has(v)))return d;
    }
    // Compatibility fallback: older settings may be keyed by ID, code, or full display name.
    const all=await getDocs(studentSettings);
