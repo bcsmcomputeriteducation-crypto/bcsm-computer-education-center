@@ -87,12 +87,33 @@ const api={
    const current=await getDoc(ref);
    if(!current.exists())throw new Error("Yeh request Cloud mein nahi mili. Student se nayi request bhejwayein.");
    const old=current.data();
-   // Idempotent: once approved/denied, another admin device must not process it again.
-   if(old.status===status)return {id:current.id,...old};
-   if(old.status!=="pending")throw new Error("Is request ka status pehle hi "+String(old.status||"update")+" ho chuka hai. List refresh karein.");
-   await updateDoc(ref,{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+   if(!["pending","approved","denied"].includes(old.status))throw new Error("Is request ka status pehle hi "+String(old.status||"update")+" ho chuka hai. List refresh karein.");
+   if(old.status!==status){
+     await updateDoc(ref,{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid});
+   }
+   /* A student may submit the same exam request more than once (for example after refreshing or pressing the request button again). Resolve sibling pending requests for the exact same student + course + semester + batch, so one approval does not leave a duplicate pending row on the next refresh. */
+   if(old.studentUid&&old.courseId&&old.semester){
+     const all=await getDocs(coll);
+     const siblings=all.docs.filter(s=>{
+       if(s.id===String(id))return false;
+       const d=s.data()||{};
+       return d.status==="pending" && String(d.studentUid||"")===String(old.studentUid) &&
+         String(d.courseId||"")===String(old.courseId) &&
+         String(d.semester||"").trim().toLowerCase()===String(old.semester||"").trim().toLowerCase() &&
+         String(d.batch||"")===String(old.batch||"");
+     });
+     await Promise.all(siblings.map(s=>updateDoc(s.ref,{status,approvedAt:new Date().toISOString(),approvedBy:auth.currentUser.email||auth.currentUser.uid})));
+   }
    const verified=await getDoc(ref);
    if(!verified.exists()||verified.data().status!==status)throw new Error("Approval Cloud par confirm nahi hua. Rules aur internet check karein.");
+   // Refresh the visible list immediately; the Firestore listener will also deliver the canonical snapshot.
+   latestRows=latestRows.map(r=>r.id===String(id)||(
+     old.studentUid && String(r.studentUid||"")===String(old.studentUid) &&
+     String(r.courseId||"")===String(old.courseId||"") &&
+     String(r.semester||"").trim().toLowerCase()===String(old.semester||"").trim().toLowerCase() &&
+     String(r.batch||"")===String(old.batch||"") && r.status==="pending"
+   )?{...r,status}:r);
+   renderApproval();
    return {id:verified.id,...verified.data()};
  },
  async getExamQuestions(courseId,semester){
