@@ -41,29 +41,29 @@ service cloud.firestore {
         request.resource.data.courseName is string && request.resource.data.courseId is string &&
         request.resource.data.courseKey is string && request.resource.data.semester is string &&
         request.resource.data.batch is string && request.resource.data.requestToken is string;
-      allow read: if canManageInstitute() || (signedIn() && resource.data.studentUid == request.auth.uid);
-      allow update: if canManageInstitute() && request.resource.data.status in ['approved', 'denied'] &&
+      allow read: if isAdmin() || (signedIn() && resource.data.studentUid == request.auth.uid);
+      allow update: if isAdmin() && request.resource.data.status in ['approved', 'denied'] &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'approvedAt', 'approvedBy']);
-      allow delete: if canManageInstitute();
+      allow delete: if isAdmin();
     }
     match /monthlyExamSettings/{courseKey} {
       allow read: if signedIn();
-      allow create, update: if canManageInstitute() && request.resource.data.courseKey == courseKey &&
+      allow create, update: if isAdmin() && request.resource.data.courseKey == courseKey &&
         request.resource.data.type == 'Monthly Main Exam' && request.resource.data.published == true &&
         request.resource.data.questionCount is number && request.resource.data.duration is number &&
         request.resource.data.totalMarks is number && request.resource.data.passMarks is number;
-      allow delete: if canManageInstitute();
+      allow delete: if isAdmin();
     }
     match /monthlyExamResults/{resultId} {
       allow create: if signedIn() && request.resource.data.studentUid == request.auth.uid &&
         request.resource.data.id == resultId && request.resource.data.score is number &&
         request.resource.data.maxScore is number && request.resource.data.examId is string;
-      allow read: if canManageInstitute() || (signedIn() && resource.data.studentUid == request.auth.uid);
-      allow update, delete: if canManageInstitute();
+      allow read: if isAdmin() || (signedIn() && resource.data.studentUid == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
-    match /examQuestions/{id} { allow read: if signedIn(); allow write: if canManageInstitute(); }
-    match /monthlyExams/{id} { allow read: if signedIn(); allow write: if canManageInstitute(); }
-    match /examCloudConfig/{id} { allow read: if signedIn(); allow write: if canManageInstitute(); }
+    match /examQuestions/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /monthlyExams/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /examCloudConfig/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
     match /{document=**} { allow read, write: if false; }
   }
 }
