@@ -69,6 +69,11 @@ const api={
    if(!verify.exists()||verify.val().published!==true||verify.val().type!=="Monthly Main Exam")throw new Error("Realtime Database ne settings save confirm nahi ki. database.rules.json publish karein aur Admin login check karein.");
    return {id:key,...verify.val()};
  },
+ async getAllCourseExamSettings(){
+   await ensureStudentSession();
+   const snap=await dbGet(dbRef(studentRtdb,"monthlyExamSettings"));
+   return snap.exists()?(snap.val()||{}):{};
+ },
  async getCourseExamSettings(identity){
    const keys=[...new Set(identityValues(identity).map(courseKey).filter(Boolean))];
    for(const key of keys){const snap=await dbGet(dbRef(studentRtdb,"monthlyExamSettings/"+key));if(snap.exists()){const d={id:snap.key,...snap.val()};if(d.published===true&&d.type==="Monthly Main Exam")return d;}}
@@ -106,12 +111,18 @@ const api={
  },
  async deleteExamResult(resultId){
    if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
-   await deleteDoc(doc(firestore,"monthlyExamResults",String(resultId)));
+   const id=String(resultId);
+   // Tombstone stops legacy/local sync from recreating an intentionally deleted result.
+   await deleteDoc(doc(firestore,"monthlyExamResults",id));
+   const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");
+   if(!deleted.includes(id)){deleted.push(id);localStorage.setItem("bcsmDeletedMonthlyResults_v1",JSON.stringify(deleted.slice(-5000)));}
  },
  async saveExamResult(result){
    const user=await ensureStudentSession();
    if(!user)throw new Error("Student Firebase session nahi mila. Dobara request karke exam submit karein.");
    const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
+   const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");
+   if(deleted.includes(id))throw new Error("Yeh result ID delete list mein hai. Naya result ID banakar submit karein.");
    const payload={...result,id,studentUid:user.uid,submittedAt:serverTimestamp(),source:"web-exam"};
    await setDoc(doc(studentFirestore,"monthlyExamResults",id),payload);
    return payload;
