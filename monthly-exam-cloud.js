@@ -141,7 +141,6 @@ const api={
      callback(latestRows);renderApproval();
    },e=>{console.error("Admin request feed:",e);callback([]);const feed=document.getElementById("cloudApprovalFeed");if(feed)feed.innerHTML='<p class="error">Approval list load nahi hui: '+esc(friendlyAuthError(e))+'</p>';});
  }
- }
 };
 window.BCSMExamCloud=api;
 let adminUnsub=null,latestRows=[];
