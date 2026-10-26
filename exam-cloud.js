@@ -59,7 +59,7 @@ function attachUserScopedListeners(user) {
     readyKinds.add('monthlyExamResults'); initialLoads++;
     if (initialLoads >= 5) firstCloudLoadResolve();
     if (admin()) appBridge()?.refresh?.();
-    if (admin() && snap.empty) migrateLegacy('monthlyExamResults').catch(reportError);
+    // Never repopulate an intentionally emptied result collection from stale localStorage.
   }, reportError);
 }
 
@@ -92,6 +92,7 @@ function onSnapshotNotice() {
 async function bootstrapLegacyCloud() {
   if (!admin()) return;
   for (const kind of Object.keys(COLLECTIONS)) {
+    if (kind === 'monthlyExamResults') continue; // Do not recreate deleted results from legacy browser data.
     const existing = await getDocs(collection(store, COLLECTIONS[kind]));
     if (existing.empty) await migrateLegacy(kind);
   }
@@ -104,6 +105,7 @@ async function bootstrapLegacyCloud() {
 
 async function migrateLegacy(kind) {
   if (!admin()) return;
+  if (kind === 'monthlyExamResults') return; // Result deletion must remain permanent.
   const items = legacySeed[kind] || [];
   if (!items?.length) return;
   // A fresh get immediately before migration prevents a stale empty listener from overwriting cloud data.
@@ -148,7 +150,8 @@ async function syncFromApp(d) {
 async function syncCollection(kind, items, canManage) {
   const refName = COLLECTIONS[kind];
   if (!refName) return;
-  const current = new Map((items || []).filter(x => x?.id).map(x => [String(x.id), x]));
+  const deletedResults = kind === 'monthlyExamResults' ? new Set(JSON.parse(localStorage.getItem('bcsmDeletedMonthlyResults_v1') || '[]').map(String)) : new Set();
+  const current = new Map((items || []).filter(x => x?.id && !deletedResults.has(String(x.id))).map(x => [String(x.id), x]));
   const previous = cache[kind];
   for (const [id, item] of current) {
     const old = previous.get(id);
