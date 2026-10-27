@@ -11,6 +11,7 @@ const settingsColl=collection(firestore,"monthlyExamSettings"),studentSettings=c
 const ADMIN_EMAILS=["bcsmcomputer.iteducation+admin@gmail.com","bcsmcomputer.iteducation+institute@gmail.com"];
 const esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const courseKey=v=>String(v??"").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g,"").trim();
+function studentExamIdentity(identity){const x=identity&&typeof identity==="object"?identity:{};const name=String(x.studentName||x.name||"").normalize("NFKC").toLowerCase().replace(/\s+/g," ").trim();const phone=String(x.studentPhone||x.phone||"").replace(/\D/g,"");const course=String(x.courseId||x.courseCode||x.courseKey||"").trim().toLowerCase();const semester=String(x.semester||"").normalize("NFKC").toLowerCase().replace(/\s+/g," ").trim();return [name,phone,course,semester].join("|");}
 function isMainAdmin(){const u=auth.currentUser;return !!u&&(ADMIN_EMAILS.includes(String(u.email||"").toLowerCase())||["n9XlY6yAR7b7vkVjiXkvOXv50O33","YCtq6PUlGKN7hnojQexb8Y3j1qE2"].includes(String(u.uid||"")));}
 function friendlyAuthError(e){
  if(["auth/operation-not-allowed","auth/admin-restricted-operation"].includes(e?.code))return "Firebase Console → Authentication → Sign-in method → Anonymous ko Enable karke Save karein; phir page reload karein.";
@@ -103,11 +104,14 @@ const api={
    const seen=new Set();
    return rows.filter(q=>{const text=pick(q.questionHindi,q.hindiQuestion,q.question_hi,q.questionHi,q.questionEnglish,q.englishQuestion,q.question_en,q.questionEn,q.question,q.questionText,q.hindi,q.english).normalize("NFKC").toLowerCase().replace(/\s+/g," ").trim();if(!text||seen.has(text))return false;seen.add(text);return true;});
  },
- async hasExamResult(studentUid,examId){
-   if(!studentUid||!examId)return false;
+ async hasExamResult(identity,examId){
+   if(!identity||!examId)return false;
    await ensureStudentSession();
-   const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentUid","==",String(studentUid)),where("examId","==",String(examId)));
-   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.deleted!==true);
+   // Anonymous Firebase UID is browser-scoped; use the entered student identity instead.
+   const studentKey=studentExamIdentity(identity);
+   if(!studentKey.replace(/\|/g,""))return false;
+   const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentKey","==",studentKey));
+   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.examId===String(examId)&&d.data()?.deleted!==true);
  },
  async deleteExamResult(resultId){
    if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
@@ -125,8 +129,13 @@ const api={
    const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
    const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");
    if(deleted.includes(id))throw new Error("Yeh result ID delete list mein hai. Naya result ID banakar submit karein.");
-   const payload={...result,id,studentUid:user.uid,submittedAt:serverTimestamp(),source:"web-exam"};
-   await setDoc(doc(studentFirestore,"monthlyExamResults",id),payload);
+   const studentKey=studentExamIdentity(result);
+   if(!studentKey.replace(/\|/g,""))throw new Error("Student ka naam, course aur semester result mein nahi mila.");
+   const payload={...result,id,studentUid:user.uid,studentKey,submittedAt:serverTimestamp(),source:"web-exam"};
+   const resultRef=doc(studentFirestore,"monthlyExamResults",id);
+   await setDoc(resultRef,payload);
+   const verify=await getDoc(resultRef);
+   if(!verify.exists()||verify.data()?.id!==id||verify.data()?.studentKey!==studentKey)throw new Error("Firebase par result save hone ki confirmation nahi mili. Submit dobara karein.");
    return payload;
  },
  async createCommonExamToken(){
