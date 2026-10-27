@@ -1,3 +1,34 @@
 {
-  "firestore": { "rules": "firestore.rules" }
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "monthlyExamRequests": {
+      ".read": "auth != null && (auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')",
+      "$requestId": {
+        ".read": "auth != null && (auth.uid === data.child('studentUid').val() || auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')",
+        ".write": "auth != null && ((auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com') || (!data.exists() && newData.child('studentUid').val() === auth.uid && newData.child('status').val() === 'pending') || (data.child('studentUid').val() === auth.uid && newData.child('studentUid').val() === auth.uid && newData.child('status').val() === data.child('status').val()))"
+      }
+    },
+    "monthlyExamSettings": {
+      ".read": "auth != null",
+      "$courseKey": {
+        ".write": "auth != null && (auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')"
+      }
+    },
+    "monthlyExamToken": {
+      ".read": "auth != null",
+      "current": {
+        ".write": "auth != null && (auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')"
+      }
+    },
+    "monthlyExamResults": {
+      ".read": "auth != null && (auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')",
+      "$studentUid": {
+        ".read": "auth != null && (auth.uid === $studentUid || auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com')",
+        "$resultId": {
+          ".write": "auth != null && ((auth.uid === 'n9XlY6yAR7b7vkVjiXkvOXv50O33' || auth.uid === 'YCtq6PUlGKN7hnojQexb8Y3j1qE2' || auth.token.email === 'bcsmcomputer.iteducation+admin@gmail.com' || auth.token.email === 'bcsmcomputer.iteducation+institute@gmail.com') || (auth.uid === $studentUid && !data.exists() && newData.exists() && newData.child('studentUid').val() === auth.uid && newData.child('id').val() === $resultId && newData.child('examId').isString() && newData.child('score').isNumber() && newData.child('maxScore').isNumber()))"
+        }
+      }
+    }
+  }
 }
