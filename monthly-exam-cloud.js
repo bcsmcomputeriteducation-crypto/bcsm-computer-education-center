@@ -114,7 +114,7 @@ const api={
    const id=String(resultId);
    // Durable tombstone prevents result resurrection after refresh and on other admin browsers.
     const resultRef=doc(firestore,"monthlyExamResults",id);const existing=await getDoc(resultRef);
-    if(existing.exists())await setDoc(resultRef,{...existing.data(),id,deleted:true,deletedAt:new Date().toISOString(),deletedBy:auth.currentUser?.email||auth.currentUser?.uid||"admin"});
+    await setDoc(resultRef,{...(existing.exists()?existing.data():{}),id,deleted:true,deletedAt:new Date().toISOString(),deletedBy:auth.currentUser?.email||auth.currentUser?.uid||"admin"});
     const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");if(!deleted.includes(id)){deleted.push(id);localStorage.setItem("bcsmDeletedMonthlyResults_v1",JSON.stringify(deleted.slice(-5000)));}
     const hex=Array.from(id).map(ch=>ch.codePointAt(0).toString(16)).join("_");try{await deleteDoc(doc(firestore,"appData",("record_results_"+(hex||"empty")).slice(0,1400)));}catch(e){console.warn("Result appData mirror cleanup:",e);}
     window.dispatchEvent(new CustomEvent("bcsm-monthly-result-deleted",{detail:{id}}));
