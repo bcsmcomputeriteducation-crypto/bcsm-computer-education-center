@@ -127,7 +127,7 @@ const api={
      // Results are now in RTDB under the authenticated student's UID; no Firestore result read is required.
      const snap=await dbGet(dbRef(studentRtdb,"monthlyExamResults/"+user.uid));
      if(!snap.exists())return false;
-     let found=false;snap.forEach(child=>{const r=child.val()||{};if(r.studentKey===studentKey&&r.examId===String(examId))found=true;});
+     let found=false;snap.forEach(child=>{const r=child.val()||{};if(r.deleted!==true&&r.studentKey===studentKey&&r.examId===String(examId))found=true;});
      return found; // Deleted tombstones remain as a lock until the admin explicitly clears them.
    }catch(e){console.error("MONTHLY_EXAM_STAGE=result_lock_rtdb",e);throw new Error("STAGE=RESULT_LOCK_RTDB: Realtime Database mein previous-result check fail hua. "+friendlyAuthError(e));}
  },
