@@ -111,7 +111,7 @@ const api={
    const studentKey=studentExamIdentity(identity);
    if(!studentKey.replace(/\|/g,""))return false;
    const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentKey","==",studentKey));
-   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.examId===String(examId)&&d.data()?.deleted!==true);
+   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.examId===String(examId)); // Deleted result tombstones still lock the exam permanently.
  },
  async deleteExamResult(resultId){
    if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
