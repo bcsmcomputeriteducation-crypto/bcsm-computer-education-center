@@ -106,12 +106,17 @@ const api={
  },
  async hasExamResult(identity,examId){
    if(!identity||!examId)return false;
-   await ensureStudentSession();
-   // Anonymous Firebase UID is browser-scoped; use the entered student identity instead.
+   const user=await ensureStudentSession();
+   // Firestore Rules allow a student to query only results whose studentUid
+   // matches the current anonymous Firebase UID. Querying studentKey alone
+   // is rejected by Rules and causes "Missing or insufficient permissions".
+   // This check is therefore device/session scoped until the student has a
+   // stable authenticated identity shared across devices.
    const studentKey=studentExamIdentity(identity);
    if(!studentKey.replace(/\|/g,""))return false;
-   const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentKey","==",studentKey));
-   const snap=await getDocs(q);return snap.docs.some(d=>d.data()?.examId===String(examId)); // Deleted result tombstones still lock the exam permanently.
+   const q=query(collection(studentFirestore,"monthlyExamResults"),where("studentUid","==",user.uid));
+   const snap=await getDocs(q);
+   return snap.docs.some(d=>d.data()?.studentKey===studentKey && d.data()?.examId===String(examId));
  },
  async deleteExamResult(resultId){
    if(!isMainAdmin())throw new Error("Sirf Main Admin online exam result delete kar sakta hai.");
