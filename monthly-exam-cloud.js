@@ -147,17 +147,23 @@ const api={
    if(!user)throw new Error("Student Firebase session nahi mila. Dobara request karke exam submit karein.");
    const id=String(result?.id||"");if(!id)throw new Error("Result ID missing.");
    const deleted=JSON.parse(localStorage.getItem("bcsmDeletedMonthlyResults_v1")||"[]");
-   if(deleted.includes(id))throw new Error("Yeh result ID delete list mein hai. Naya result ID banakar submit karein.");
+   if(deleted.includes(id))throw new Error("Yeh result ID delete list mein hai. Submit dobara karein; naya result ID banega.");
    const studentKey=studentExamIdentity(result);
    if(!studentKey.replace(/\|/g,""))throw new Error("Student ka naam, course aur semester result mein nahi mila.");
-   const payload={...result,id,studentUid:user.uid,studentKey,submittedAt:new Date().toISOString(),source:"web-exam",deleted:false};
+   // Keep only RTDB-safe, serializable result fields and force identity fields from the active anonymous session.
+   const payload=JSON.parse(JSON.stringify({...result,id,studentUid:user.uid,studentKey,submittedAt:new Date().toISOString(),source:"web-exam",deleted:false}));
    const resultRef=dbRef(studentRtdb,"monthlyExamResults/"+user.uid+"/"+id);
    try{
      await dbSet(resultRef,payload);
      const verify=await dbGet(resultRef);
-     if(!verify.exists()||verify.val()?.id!==id||verify.val()?.studentKey!==studentKey)throw new Error("RTDB save verify mismatch");
-     return payload;
-   }catch(e){console.error("MONTHLY_EXAM_STAGE=result_save_rtdb",e);throw new Error("STAGE=RESULT_SAVE_RTDB: Result Realtime Database mein save nahi hua. database.rules.json publish karein. "+friendlyAuthError(e));}
+     if(!verify.exists()||String(verify.val()?.id)!==id||String(verify.val()?.studentUid)!==String(user.uid)||String(verify.val()?.studentKey)!==studentKey)throw new Error("Firebase ne save ke baad wahi result verify nahi kiya.");
+     window.dispatchEvent(new CustomEvent("bcsm-monthly-result-saved",{detail:{id,result:verify.val()}}));
+     return verify.val();
+   }catch(e){
+     console.error("MONTHLY_EXAM_STAGE=result_save_rtdb",e);
+     const detail=friendlyAuthError(e);
+     throw new Error("STAGE=RESULT_SAVE_RTDB: Firebase Realtime Database mein result save/verify nahi hua. Firebase Console → Realtime Database → Rules mein project ki database.rules.json rules publish karein. Error: "+detail);
+   }
  },
  async createCommonExamToken(){
    if(!isMainAdmin())throw new Error("Sirf Main Admin Exam Token bana sakta hai.");
